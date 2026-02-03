@@ -1,0 +1,55 @@
+// ==========================================================================
+// Paste Elements - Base Variables
+// ==========================================================================
+
+// Colors
+$paste-color-primary: #0A56A2 !default;
+$paste-color-secondary: #6c757d !default;
+$paste-color-success: #28a745 !default;
+$paste-color-danger: #dc3545 !default;
+$paste-color-warning: #ffc107 !default;
+$paste-color-info: #17a2b8 !default;
+$paste-color-light: #f8f9fa !default;
+$paste-color-dark: #343a40 !default;
+
+// Typography
+$paste-font-family-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !default;
+$paste-font-family-monospace: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !default;
+
+$paste-font-size-base: 1rem !default;
+$paste-font-size-sm: 0.875rem !default;
+$paste-font-size-lg: 1.25rem !default;
+
+$paste-line-height-base: 1.5 !default;
+
+// Spacing
+$paste-spacing-unit: 0.25rem !default;
+
+// Breakpoints
+$paste-breakpoint-xs: 0 !default;
+$paste-breakpoint-sm: 576px !default;
+$paste-breakpoint-md: 768px !default;
+$paste-breakpoint-lg: 992px !default;
+$paste-breakpoint-xl: 1200px !default;
+$paste-breakpoint-xxl: 1400px !default;
+
+$paste-breakpoints: (
+  xs: $paste-breakpoint-xs,
+  sm: $paste-breakpoint-sm,
+  md: $paste-breakpoint-md,
+  lg: $paste-breakpoint-lg,
+  xl: $paste-breakpoint-xl,
+  xxl: $paste-breakpoint-xxl
+) !default;
+
+// Z-index
+$paste-zindex-dropdown: 1000 !default;
+$paste-zindex-sticky: 1020 !default;
+$paste-zindex-fixed: 1030 !default;
+$paste-zindex-modal-backdrop: 1040 !default;
+$paste-zindex-modal: 1050 !default;
+$paste-zindex-tooltip: 1070 !default;
+
+// Transitions
+$paste-transition-base: all 0.2s ease-in-out !default;
+$paste-transition-fade: opacity 0.15s linear !default;

@@ -1,0 +1,12 @@
+// ==========================================================================
+// Paste Elements - Hero Scroll Variables
+// ==========================================================================
+
+@import '../../base/variables';
+
+$paste-hero-min-height: 50vh !default;
+$paste-hero-min-height-full: 100vh !default;
+$paste-hero-padding-y: 4rem !default;
+$paste-hero-background-color: $paste-color-dark !default;
+$paste-hero-text-color: #fff !default;
+$paste-hero-parallax-speed: 0.5 !default;

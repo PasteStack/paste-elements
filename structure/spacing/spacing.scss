@@ -1,0 +1,48 @@
+// ==========================================================================
+// Paste Elements - Spacing Utilities
+// ==========================================================================
+
+@import 'variables';
+
+// Margin utilities
+@each $size, $value in $paste-spacers {
+  .paste-m-#{$size} { margin: $value !important; }
+  .paste-mt-#{$size} { margin-top: $value !important; }
+  .paste-mr-#{$size} { margin-right: $value !important; }
+  .paste-mb-#{$size} { margin-bottom: $value !important; }
+  .paste-ml-#{$size} { margin-left: $value !important; }
+  .paste-mx-#{$size} { margin-left: $value !important; margin-right: $value !important; }
+  .paste-my-#{$size} { margin-top: $value !important; margin-bottom: $value !important; }
+}
+
+// Padding utilities
+@each $size, $value in $paste-spacers {
+  .paste-p-#{$size} { padding: $value !important; }
+  .paste-pt-#{$size} { padding-top: $value !important; }
+  .paste-pr-#{$size} { padding-right: $value !important; }
+  .paste-pb-#{$size} { padding-bottom: $value !important; }
+  .paste-pl-#{$size} { padding-left: $value !important; }
+  .paste-px-#{$size} { padding-left: $value !important; padding-right: $value !important; }
+  .paste-py-#{$size} { padding-top: $value !important; padding-bottom: $value !important; }
+}
+
+// Auto margins
+.paste-mx-auto { margin-left: auto !important; margin-right: auto !important; }
+.paste-ml-auto { margin-left: auto !important; }
+.paste-mr-auto { margin-right: auto !important; }
+
+// Section spacing
+.paste-section {
+  padding-top: $paste-section-padding-y;
+  padding-bottom: $paste-section-padding-y;
+}
+
+.paste-section-sm {
+  padding-top: $paste-section-padding-y-sm;
+  padding-bottom: $paste-section-padding-y-sm;
+}
+
+.paste-section-lg {
+  padding-top: $paste-section-padding-y-lg;
+  padding-bottom: $paste-section-padding-y-lg;
+}
