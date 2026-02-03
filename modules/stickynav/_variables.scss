@@ -1,0 +1,11 @@
+// ==========================================================================
+// Paste Elements - Sticky Nav Variables
+// ==========================================================================
+
+@import '../../base/variables';
+
+$paste-stickynav-height: 50px !default;
+$paste-stickynav-background: #fff !default;
+$paste-stickynav-border-color: rgba(0, 0, 0, 0.1) !default;
+$paste-stickynav-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !default;
+$paste-stickynav-transition: transform 0.3s ease !default;

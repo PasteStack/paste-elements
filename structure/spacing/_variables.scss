@@ -1,0 +1,22 @@
+// ==========================================================================
+// Paste Elements - Spacing Variables
+// ==========================================================================
+
+@import '../../base/variables';
+
+// Spacing scale
+$paste-spacer: 1rem !default;
+
+$paste-spacers: (
+  0: 0,
+  1: $paste-spacer * 0.25,
+  2: $paste-spacer * 0.5,
+  3: $paste-spacer,
+  4: $paste-spacer * 1.5,
+  5: $paste-spacer * 3
+) !default;
+
+// Section spacing
+$paste-section-padding-y: $paste-spacer * 4 !default;
+$paste-section-padding-y-sm: $paste-spacer * 2 !default;
+$paste-section-padding-y-lg: $paste-spacer * 6 !default;
