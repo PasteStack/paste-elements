@@ -32,5 +32,7 @@ paste.define(
                 }
             };
         };
+        
+        return throttle;
     }
 );
