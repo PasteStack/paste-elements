@@ -454,7 +454,7 @@ paste['define'](
             $dispatchPageResizeTimeout,
             dispatchPageResize = function () {
                 window.clearTimeout($dispatchPageResizeTimeout);
-                if (pageResizeHandler['isBound']()) {
+                if (pageResizeSub['isBound']()) {
                     $dispatchPageResizeTimeout = window.setTimeout(pageResizeHandler, 0);
                 }
             },
