@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sticky Nav Example - Paste Elements</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        .hero {
+            height: 60vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .hero h1 { font-size: 3rem; }
+        nav {
+            background: white;
+            padding: 1rem 2rem;
+            display: flex;
+            gap: 2rem;
+            border-bottom: 1px solid #eee;
+        }
+        nav a { color: #333; text-decoration: none; }
+        nav a:hover { color: #667eea; }
+        .paste-ui-sticky-active {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .content { padding: 4rem 2rem; max-width: 800px; margin: 0 auto; }
+        section { min-height: 50vh; padding: 2rem; }
+    </style>
+</head>
+<body>
+    <div class="hero" data-paste-sticky-target="true">
+        <h1>Sticky Nav Demo</h1>
+    </div>
+    
+    <nav data-paste-sticky-nav>
+        <a href="#section1">Section 1</a>
+        <a href="#section2">Section 2</a>
+        <a href="#section3">Section 3</a>
+    </nav>
+    
+    <section id="section1">
+        <h2>Section 1</h2>
+        <p>Scroll down to see the navigation become sticky after passing the hero.</p>
+    </section>
+    
+    <section id="section2">
+        <h2>Section 2</h2>
+        <p>The navigation stays fixed at the top while scrolling through content.</p>
+    </section>
+    
+    <section id="section3">
+        <h2>Section 3</h2>
+        <p>Scroll back up to see the navigation return to its original position.</p>
+    </section>
+    
+    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/paste.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/dom.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/event.js"></script>
+    <script src="../src/js/throttle.js"></script>
+    <script src="../src/js/stickynav.js"></script>
+</body>
+</html>
