@@ -1,0 +1,16 @@
+/**
+ * Sticky navigation styles
+ */
+
+.paste-ui-sticky {
+  transition: position 0.2s ease, top 0.2s ease, box-shadow 0.2s ease;
+}
+
+.paste-ui-sticky-active {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}

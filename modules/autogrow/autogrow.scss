@@ -1,0 +1,17 @@
+// ==========================================================================
+// Paste Elements - Autogrow Textarea
+// ==========================================================================
+
+@import '../../base/variables';
+
+$paste-autogrow-min-height: 80px !default;
+$paste-autogrow-max-height: 400px !default;
+$paste-autogrow-transition: height 0.1s ease !default;
+
+[data-paste-autogrow] {
+  min-height: $paste-autogrow-min-height;
+  max-height: $paste-autogrow-max-height;
+  overflow-y: auto;
+  resize: none;
+  transition: $paste-autogrow-transition;
+}

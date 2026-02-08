@@ -1,0 +1,77 @@
+// ==========================================================================
+// Paste Elements - Layout
+// ==========================================================================
+
+@import 'variables';
+
+// Page wrapper
+.paste-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+// Header
+.paste-header {
+  position: relative;
+  height: $paste-header-height;
+  padding: $paste-header-padding-y 0;
+  background: $paste-header-background;
+  border-bottom: 1px solid $paste-header-border-color;
+  
+  @media (min-width: $paste-breakpoint-lg) {
+    height: $paste-header-height-lg;
+  }
+}
+
+.paste-header-sticky {
+  position: sticky;
+  top: 0;
+  z-index: $paste-zindex-sticky;
+}
+
+.paste-header-fixed {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: $paste-zindex-fixed;
+}
+
+// Main content
+.paste-main {
+  flex: 1 0 auto;
+  padding: $paste-main-padding-y $paste-main-padding-x;
+}
+
+// Footer
+.paste-footer {
+  flex-shrink: 0;
+  padding: $paste-footer-padding-y 0;
+  background: $paste-footer-background;
+  color: $paste-footer-color;
+}
+
+// Sidebar layout
+.paste-layout-sidebar {
+  display: flex;
+  
+  .paste-sidebar {
+    flex: 0 0 $paste-sidebar-width;
+    width: $paste-sidebar-width;
+  }
+  
+  .paste-main {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+// Offset for fixed header
+.paste-has-fixed-header {
+  padding-top: $paste-header-height;
+  
+  @media (min-width: $paste-breakpoint-lg) {
+    padding-top: $paste-header-height-lg;
+  }
+}
