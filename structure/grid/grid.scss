@@ -1,0 +1,73 @@
+// ==========================================================================
+// Paste Elements - Grid System
+// ==========================================================================
+
+@import 'variables';
+
+// Container
+.paste-container {
+  width: 100%;
+  padding-right: $paste-container-padding-x;
+  padding-left: $paste-container-padding-x;
+  margin-right: auto;
+  margin-left: auto;
+  
+  @each $breakpoint, $max-width in $paste-container-max-widths {
+    @media (min-width: map-get($paste-breakpoints, $breakpoint)) {
+      max-width: $max-width;
+    }
+  }
+}
+
+.paste-container-fluid {
+  width: 100%;
+  padding-right: $paste-container-padding-x;
+  padding-left: $paste-container-padding-x;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+// Row
+.paste-row {
+  display: flex;
+  flex-wrap: wrap;
+  margin-right: calc($paste-grid-gutter / -2);
+  margin-left: calc($paste-grid-gutter / -2);
+}
+
+// Columns
+[class*="paste-col-"] {
+  position: relative;
+  width: 100%;
+  padding-right: calc($paste-grid-gutter / 2);
+  padding-left: calc($paste-grid-gutter / 2);
+}
+
+// Generate column classes
+@for $i from 1 through $paste-grid-columns {
+  .paste-col-#{$i} {
+    flex: 0 0 calc(100% * $i / $paste-grid-columns);
+    max-width: calc(100% * $i / $paste-grid-columns);
+  }
+}
+
+// Responsive columns
+@each $breakpoint, $min-width in $paste-breakpoints {
+  @if $min-width != 0 {
+    @media (min-width: $min-width) {
+      @for $i from 1 through $paste-grid-columns {
+        .paste-col-#{$breakpoint}-#{$i} {
+          flex: 0 0 calc(100% * $i / $paste-grid-columns);
+          max-width: calc(100% * $i / $paste-grid-columns);
+        }
+      }
+    }
+  }
+}
+
+// Auto columns
+.paste-col-auto {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+}

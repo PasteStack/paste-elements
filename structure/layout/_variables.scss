@@ -1,0 +1,25 @@
+// ==========================================================================
+// Paste Elements - Layout Variables
+// ==========================================================================
+
+@import '../../base/variables';
+
+// Header
+$paste-header-height: 60px !default;
+$paste-header-height-lg: 80px !default;
+$paste-header-padding-y: 1rem !default;
+$paste-header-background: #fff !default;
+$paste-header-border-color: rgba(0, 0, 0, 0.1) !default;
+
+// Footer
+$paste-footer-padding-y: 2rem !default;
+$paste-footer-background: $paste-color-dark !default;
+$paste-footer-color: #fff !default;
+
+// Sidebar
+$paste-sidebar-width: 280px !default;
+$paste-sidebar-width-collapsed: 64px !default;
+
+// Main content
+$paste-main-padding-y: 2rem !default;
+$paste-main-padding-x: 1rem !default;

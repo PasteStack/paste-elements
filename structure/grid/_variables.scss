@@ -1,0 +1,28 @@
+// ==========================================================================
+// Paste Elements - Grid Variables
+// ==========================================================================
+
+@import '../../base/variables';
+
+// Grid
+$paste-grid-columns: 12 !default;
+$paste-grid-gutter: 1.5rem !default;
+$paste-grid-gutter-sm: 1rem !default;
+
+// Container max-widths
+$paste-container-max-width-sm: 540px !default;
+$paste-container-max-width-md: 720px !default;
+$paste-container-max-width-lg: 960px !default;
+$paste-container-max-width-xl: 1140px !default;
+$paste-container-max-width-xxl: 1320px !default;
+
+$paste-container-max-widths: (
+  sm: $paste-container-max-width-sm,
+  md: $paste-container-max-width-md,
+  lg: $paste-container-max-width-lg,
+  xl: $paste-container-max-width-xl,
+  xxl: $paste-container-max-width-xxl
+) !default;
+
+// Container padding
+$paste-container-padding-x: $paste-grid-gutter !default;
