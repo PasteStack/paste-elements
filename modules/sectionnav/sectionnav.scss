@@ -1,0 +1,41 @@
+// ==========================================================================
+// Paste Elements - Section Nav
+// ==========================================================================
+
+@import 'variables';
+
+.paste-ui-section-nav {
+  display: none;
+  background-color: $paste-section-nav-background;
+  border-bottom: $paste-section-nav-border-bottom;
+  width: 100%;
+
+  @media (min-width: $paste-section-nav-breakpoint) {
+    display: block;
+  }
+}
+
+.paste-ui-section-nav-items {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  height: $paste-section-nav-height;
+  max-width: $paste-section-nav-max-width;
+}
+
+.paste-ui-section-nav-item {
+  a {
+    display: block;
+    padding: $paste-section-nav-link-padding;
+    color: $paste-section-nav-link-color;
+    font-size: $paste-section-nav-font-size;
+    text-decoration: none;
+    transition: color 0.15s ease-in-out;
+
+    &:hover {
+      color: $paste-section-nav-link-hover-color;
+    }
+  }
+}
