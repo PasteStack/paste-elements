@@ -1,0 +1,16 @@
+// ==========================================================================
+// Paste Elements - Section Nav Variables
+// ==========================================================================
+
+@import '../../base/variables';
+@import '../stickynav/variables';
+
+$paste-section-nav-height: $paste-stickynav-height !default;
+$paste-section-nav-background: $paste-stickynav-background !default;
+$paste-section-nav-border-bottom: 1px solid $paste-stickynav-border-color !default;
+$paste-section-nav-link-padding: 10px 25px !default;
+$paste-section-nav-link-color: #000 !default;
+$paste-section-nav-link-hover-color: $paste-color-primary !default;
+$paste-section-nav-font-size: $paste-font-size-sm !default;
+$paste-section-nav-max-width: 1016px !default;
+$paste-section-nav-breakpoint: $paste-breakpoint-md !default;
