@@ -1,82 +1,148 @@
 /**
- * Sticky navigation
+ * Monitors viewport scrolls and resizes to determine when the user has scrolled beyond a certain element (adjusted for
+ * offset). Appends a class to the nav and fires an event to the window when a nav is stuck and unstuck. A spacer
+ * element is inserted to preserve document flow when the nav becomes fixed.
+ *
+ * MinWidths are established to prevent browsers from running the handler if the viewport's width is too narrow to
+ * require it. E.g. the nav may not be sticky < 1016px because the mini header comes into play. It's set as a data
+ * attribute to be customizable.
+ *
+ * Ported from jawbone.ui.stickynav (srv)
+ *
  * @requires paste/dom
  * @requires paste/event
- * @requires paste/ui/throttle
  * @module paste/ui/stickynav
  */
 
-paste.define(
+paste['define'](
     'paste.ui.stickynav',
     [
         'paste.dom',
-        'paste.event',
-        'paste.ui.throttle'
+        'paste.event'
     ],
-    function (module, dom, event, throttle) {
+    function (stickynav, dom, event) {
         'use strict';
-        
-        var STICKY_SELECTOR = '[data-paste-sticky-nav]',
-            STICKY_TARGET_SELECTOR = '[data-paste-sticky-target]',
+
+        var $stickyNavTarget = dom['querySelector']('.sticky-nav-target') || dom['querySelector']('[data-paste-sticky-target]'),
+            $nav = dom['querySelector']('[data-paste-sticky-nav]') || dom['querySelector']('.paste-ui-section-nav'),
+            $spacer,
+            navBounds,
+            spacerHeight,
+            topOffset,
+            minWidth,
+            windowTop,
+            windowWidth,
+            handler,
+            resizeHandler,
+            scrollSub,
+            resizeSub,
+            navStuckEvent,
+            navUnstuckEvent,
+            calculateTopOffset,
+            calculateWindowWidth,
+            createSpacer,
             STICKY_CLASS = 'paste-ui-sticky',
             STICKY_ACTIVE_CLASS = 'paste-ui-sticky-active',
-            
-            navs = [],
-            
-            initNav = function(el) {
-                var targetSelector = el.getAttribute('data-paste-sticky-nav'),
-                    target = targetSelector ? dom.get(targetSelector) : dom.get(STICKY_TARGET_SELECTOR),
-                    offsetTop = el.offsetTop;
-                
-                navs.push({
-                    el: el,
-                    target: target,
-                    offsetTop: offsetTop,
-                    height: el.offsetHeight,
-                    isSticky: false
-                });
-                
-                el.classList.add(STICKY_CLASS);
-            },
-            
-            updateSticky = function() {
-                var scrollY = window.pageYOffset || document.documentElement.scrollTop;
-                
-                navs.forEach(function(nav) {
-                    var triggerPoint = nav.target ? 
-                        nav.target.offsetTop + nav.target.offsetHeight : 
-                        nav.offsetTop;
-                    
-                    if (scrollY >= triggerPoint && !nav.isSticky) {
-                        nav.el.classList.add(STICKY_ACTIVE_CLASS);
-                        nav.isSticky = true;
-                    } else if (scrollY < triggerPoint && nav.isSticky) {
-                        nav.el.classList.remove(STICKY_ACTIVE_CLASS);
-                        nav.isSticky = false;
-                    }
-                });
-            },
-            
-            onScroll = throttle(updateSticky, 16, 'stickynav'),
-            
-            init = function() {
-                var navElements = dom.get(STICKY_SELECTOR, true);
-                
-                if (navElements && navElements.length) {
-                    navElements.forEach(initNav);
-                    event['bind']('scroll', window, onScroll);
-                    updateSticky();
-                }
-            };
-        
-        // Initialize on DOM ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', init);
-        } else {
-            init();
+            touchSupported = (function () {
+                // this isn't the best touch detection, but it serves our purposes here
+                return (('ontouchstart' in window) || (window['DocumentTouch'] && document instanceof DocumentTouch));
+            }());
+
+        if (!$nav || touchSupported) {
+            return;
         }
-        
-        module.init = init;
-        module.updateSticky = updateSticky;
+
+        minWidth = parseInt($nav.getAttribute('data-sticky-min-width'), 10) || 0;
+        windowTop = dom['getScrollTop']();
+
+        createSpacer = function () {
+            var el = document.createElement('div');
+            el.className = 'paste-ui-sticky-spacer';
+            el.style.display = 'none';
+            $nav.parentNode.insertBefore(el, $nav.nextSibling);
+            return el;
+        };
+
+        calculateTopOffset = function () {
+            if ($nav.stuck === true) { return; }
+
+            navBounds = dom['Bounds']['fromElement']($nav);
+
+            var computedMarginTop = parseInt(dom['getComputedStyle']($nav, 'margin-top'), 10) || 0;
+            spacerHeight = Math.max(0, navBounds.height + computedMarginTop);
+
+            topOffset = $stickyNavTarget ?
+                dom['Bounds']['fromElement']($stickyNavTarget).top + dom['Bounds']['fromElement']($stickyNavTarget).height :
+                navBounds.top;
+        };
+
+        calculateWindowWidth = function () {
+            windowWidth = dom['getViewportWidth']();
+        };
+
+        handler = function () {
+            if (windowWidth <= minWidth) {
+                if ($nav.stuck === true) {
+                    dom['removeCssClass']($nav, STICKY_ACTIVE_CLASS);
+                    $spacer.style.display = 'none';
+                    $nav.stuck = false;
+                }
+                return;
+            }
+
+            windowTop = dom['getScrollTop']();
+
+            if (windowTop >= topOffset) {
+                if (!$nav.stuck) {
+                    // only hit the DOM if we need to
+                    $spacer.style.height = spacerHeight + 'px';
+                    $spacer.style.display = 'block';
+                    dom['addCssClass']($nav, STICKY_ACTIVE_CLASS);
+                }
+                $nav.stuck = true;
+
+                navStuckEvent = new event['Event'](window, 'navStuck');
+                navStuckEvent['fire']($nav);
+                navStuckEvent['dispose']();
+                navStuckEvent = null;
+
+            } else if (windowTop < topOffset) {
+                if ($nav.stuck === true) {
+                    // only hit the DOM if we need to
+                    dom['removeCssClass']($nav, STICKY_ACTIVE_CLASS);
+                    $spacer.style.display = 'none';
+                }
+                $nav.stuck = false;
+
+                navUnstuckEvent = new event['Event'](window, 'navUnstuck');
+                navUnstuckEvent['fire']($nav);
+                navUnstuckEvent['dispose']();
+                navUnstuckEvent = null;
+            }
+        };
+
+        resizeHandler = function () {
+            calculateWindowWidth();
+            calculateTopOffset();
+            handler();
+        };
+
+        // Call the handler on load just for fun
+        (function () {
+            dom['addCssClass']($nav, STICKY_CLASS);
+            $spacer = createSpacer();
+
+            if (document.readyState === 'complete') {
+                scrollSub = new event['Event']['Subscription']('scroll', window, handler);
+                resizeSub = new event['Event']['Subscription']('resize', window, resizeHandler);
+                resizeHandler();
+            } else {
+                window.addEventListener('load', function () {
+                    scrollSub = new event['Event']['Subscription']('scroll', window, handler);
+                    resizeSub = new event['Event']['Subscription']('resize', window, resizeHandler);
+                    resizeHandler();
+                });
+            }
+        }());
     }
 );
