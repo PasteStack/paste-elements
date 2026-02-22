@@ -1,79 +1,83 @@
+/*jslint white:false plusplus:false browser:true nomen:false */
+/*globals paste */
+
 /**
  * Monitors viewport scrolls and resizes to determine when the user has scrolled beyond a certain element (adjusted for
- * offset). Appends a class to the nav and fires an event to the window when a nav is stuck and unstuck. A spacer
- * element is inserted to preserve document flow when the nav becomes fixed.
+ * offset). Appends a class to the #content div and fires an event to the window when a nav is stuck and unstuck.
+ *
+ * Presently, we are returning out if the user is on a touch device for two reasons: 1) fixed-position elements cause
+ * some drama, particularly with iOS5 and anything less than Gingerbread. 2) most touch devices use a mini header, so a
+ * sticky subnav won't generally work with the design.
  *
  * MinWidths are established to prevent browsers from running the handler if the viewport's width is too narrow to
  * require it. E.g. the nav may not be sticky < 1016px because the mini header comes into play. It's set as a data
  * attribute to be customizable.
  *
- * Ported from jawbone.ui.stickynav (srv)
- *
+ * @requires paste
  * @requires paste/dom
  * @requires paste/event
+ * @requires paste/utils/animation-frame
  * @module paste/ui/stickynav
  */
 
-paste['define'](
+paste.define(
     'paste.ui.stickynav',
     [
         'paste.dom',
-        'paste.event'
+        'paste.event',
+        'paste.utils.animation-frame'
     ],
-    function (stickynav, dom, event) {
+    function (stickynav, dom, event, animation_frame) {
         'use strict';
 
-        var $stickyNavTarget = dom['querySelector']('.sticky-nav-target') || dom['querySelector']('[data-paste-sticky-target]'),
-            $nav = dom['querySelector']('[data-paste-sticky-nav]') || dom['querySelector']('.paste-ui-section-nav'),
-            $spacer,
+        var $stickyNav = dom['querySelector']('.sticky-nav-target'),
+            $content,
+            $body,
+            nav,
+            desktop_nav,
             navBounds,
-            spacerHeight,
+            offset,
             topOffset,
             minWidth,
             windowTop,
             windowWidth,
             handler,
             resizeHandler,
+            buildFixedNav,
             scrollSub,
             resizeSub,
+            init,
             navStuckEvent,
             navUnstuckEvent,
             calculateTopOffset,
             calculateWindowWidth,
-            createSpacer,
-            STICKY_CLASS = 'paste-ui-sticky',
-            STICKY_ACTIVE_CLASS = 'paste-ui-sticky-active',
+            FIXED_NAV_CLASS = "paste-fixed-subnav",
             touchSupported = (function () {
                 // this isn't the best touch detection, but it serves our purposes here
                 return (('ontouchstart' in window) || (window['DocumentTouch'] && document instanceof DocumentTouch));
             }());
 
-        if (!$nav || touchSupported) {
+        if (!$stickyNav || touchSupported) {
             return;
         }
 
-        minWidth = parseInt($nav.getAttribute('data-sticky-min-width'), 10) || 0;
+        $body = dom['getDocumentBody']();
+        $content = document.getElementById('content');
+        nav = document.getElementById('_paste_ui_nav_wrap');
+        desktop_nav = document.getElementById('paste-ui-nav');
+
+        minWidth = parseInt($stickyNav.getAttribute('data-sticky-min-width'), 10) ||
+            parseInt((dom['querySelector']('.paste-ui-section-nav') || {getAttribute:function(){return null;}}).getAttribute('data-sticky-min-width'), 10) || 0;
         windowTop = dom['getScrollTop']();
 
-        createSpacer = function () {
-            var el = document.createElement('div');
-            el.className = 'paste-ui-sticky-spacer';
-            el.style.display = 'none';
-            $nav.parentNode.insertBefore(el, $nav.nextSibling);
-            return el;
-        };
-
         calculateTopOffset = function () {
-            if ($nav.stuck === true) { return; }
+            if ($stickyNav.stuck === true) { return; }
 
-            navBounds = dom['Bounds']['fromElement']($nav);
+            navBounds = dom['Bounds']['fromElement'](nav);
 
-            var computedMarginTop = parseInt(dom['getComputedStyle']($nav, 'margin-top'), 10) || 0;
-            spacerHeight = Math.max(0, navBounds.height + computedMarginTop);
+            offset = navBounds.height;
 
-            topOffset = $stickyNavTarget ?
-                dom['Bounds']['fromElement']($stickyNavTarget).top + dom['Bounds']['fromElement']($stickyNavTarget).height :
-                navBounds.top;
+            topOffset = dom['Bounds']['fromElement']($stickyNav).top - offset;
         };
 
         calculateWindowWidth = function () {
@@ -81,41 +85,32 @@ paste['define'](
         };
 
         handler = function () {
-            if (windowWidth <= minWidth) {
-                if ($nav.stuck === true) {
-                    dom['removeCssClass']($nav, STICKY_ACTIVE_CLASS);
-                    $spacer.style.display = 'none';
-                    $nav.stuck = false;
-                }
-                return;
-            }
-
+            if (windowWidth <= minWidth) { return; }
             windowTop = dom['getScrollTop']();
 
             if (windowTop >= topOffset) {
-                if (!$nav.stuck) {
+                if (!$stickyNav.stuck) {
                     // only hit the DOM if we need to
-                    $spacer.style.height = spacerHeight + 'px';
-                    $spacer.style.display = 'block';
-                    dom['addCssClass']($nav, STICKY_ACTIVE_CLASS);
+                    animation_frame.request(function () {
+                        $body.classList.add(FIXED_NAV_CLASS);
+                    });
                 }
-                $nav.stuck = true;
+                $stickyNav.stuck = true;
 
                 navStuckEvent = new event['Event'](window, 'navStuck');
-                navStuckEvent['fire']($nav);
+                navStuckEvent['fire']($stickyNav);
                 navStuckEvent['dispose']();
                 navStuckEvent = null;
 
             } else if (windowTop < topOffset) {
-                if ($nav.stuck === true) {
+                if ($stickyNav.stuck === true) {
                     // only hit the DOM if we need to
-                    dom['removeCssClass']($nav, STICKY_ACTIVE_CLASS);
-                    $spacer.style.display = 'none';
+                    $body.classList.remove(FIXED_NAV_CLASS);
                 }
-                $nav.stuck = false;
+                $stickyNav.stuck = false;
 
                 navUnstuckEvent = new event['Event'](window, 'navUnstuck');
-                navUnstuckEvent['fire']($nav);
+                navUnstuckEvent['fire']($stickyNav);
                 navUnstuckEvent['dispose']();
                 navUnstuckEvent = null;
             }
@@ -127,22 +122,31 @@ paste['define'](
             handler();
         };
 
-        // Call the handler on load just for fun
-        (function () {
-            dom['addCssClass']($nav, STICKY_CLASS);
-            $spacer = createSpacer();
+        buildFixedNav = function () {
+            var $fixedNavContent = dom['querySelector']('.fixed-nav-content', $content),
+                clone;
 
-            if (document.readyState === 'complete') {
+            if (!$fixedNavContent) { return; }
+
+            clone = $fixedNavContent.cloneNode(true);
+            desktop_nav.appendChild(clone);
+        };
+
+        // Call the handler on load just for fun
+        init = (function () {
+            // clearing this cache just in case it gets cached with the page
+            $body.classList.remove(FIXED_NAV_CLASS);
+
+            buildFixedNav();
+
+            event['DocumentEvent']['loaded'](function () {
                 scrollSub = new event['Event']['Subscription']('scroll', window, handler);
                 resizeSub = new event['Event']['Subscription']('resize', window, resizeHandler);
+
+                // This is sucky, but heroscroll forces the browser to scroll to the top after 20ms,
+                // so I need to wait until that's done to take measurements
                 resizeHandler();
-            } else {
-                window.addEventListener('load', function () {
-                    scrollSub = new event['Event']['Subscription']('scroll', window, handler);
-                    resizeSub = new event['Event']['Subscription']('resize', window, resizeHandler);
-                    resizeHandler();
-                });
-            }
+            });
         }());
     }
 );
