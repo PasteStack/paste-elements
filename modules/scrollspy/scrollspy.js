@@ -1,3 +1,6 @@
+/*jslint white:false plusplus:false browser:true nomen:false */
+/*globals paste */
+
 /**
  * Appends a class to an item when its corresponding element passes a certain threshold. It was written for navs that
  * need to be "turned on" when their section has scrolled into view. It currently sets an offset for the sticky nav
@@ -5,22 +8,26 @@
  * "on" when the top of the target element has scrolled to the top of the page (adjusted for the offset). The "active"
  * class will be added to parent of the breakpoint.
  *
- * Ported from jawbone.ui.scrollspy (srv)
+ * Note: This module is not well-suited for determining when an element is visible on the page (for purposes of
+ * lazy-loading, for example).
  *
+ * @requires paste
  * @requires paste/dom
  * @requires paste/util
  * @requires paste/event
+ * @requires paste/has
  * @module paste/ui/scrollspy
  */
 
-paste['define'](
+paste.define(
     'paste.ui.scrollspy',
     [
         'paste.dom',
         'paste.util',
-        'paste.event'
+        'paste.event',
+        'paste.has'
     ],
-    function (scrollspy, dom, util, event) {
+    function (scrollspy, dom, util, event, featuredetection) {
         'use strict';
 
         var ACTIVE_CLASS = "active",
@@ -33,7 +40,7 @@ paste['define'](
             scrollTop = dom['getScrollTop'](),
             prevScrollTop = scrollTop,
             windowWidth = dom['getViewportWidth'](),
-            touchSupported = (('ontouchstart' in window) || (window['DocumentTouch'] && document instanceof DocumentTouch)),
+            touchSupported = featuredetection['touch'],
             breakpoints = [],
             groups = [],
             activeGroup = null,
@@ -162,15 +169,10 @@ paste['define'](
                     return;
                 }
 
-                if (document.readyState === 'complete') {
+                event['DocumentEvent']['loaded'](function () {
                     setUpBreakpoints();
                     scrollHandler();
-                } else {
-                    window.addEventListener('load', function () {
-                        setUpBreakpoints();
-                        scrollHandler();
-                    });
-                }
+                });
             }());
     }
 );
