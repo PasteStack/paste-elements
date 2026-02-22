@@ -16,7 +16,7 @@
  * @requires paste
  * @requires paste/dom
  * @requires paste/event
- * @requires paste/utils/animation-frame
+ * @requires paste/ui/utilities/animation-frame
  * @module paste/ui/stickynav
  */
 
@@ -25,7 +25,7 @@ paste.define(
     [
         'paste.dom',
         'paste.event',
-        'paste.utils.animation-frame'
+        'paste.ui.utilities.animation-frame'
     ],
     function (stickynav, dom, event, animation_frame) {
         'use strict';

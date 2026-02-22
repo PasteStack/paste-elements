@@ -3,7 +3,7 @@
 
 /**
  * @requires paste
- * @module paste/utils/animation-frame
+ * @module paste/ui/utilities/animation-frame
  *
  * Prevent "layout thrashing" by batching dom writes in the next animation
  * frame. The browser should attempt this roughly 60 times per second.
@@ -24,7 +24,7 @@
  */
 
 paste['define'](
-    'paste.utils.animation-frame',
+    'paste.ui.utilities.animation-frame',
     [],
     function (animation_frame) {
         'use strict';
