@@ -1,179 +1,203 @@
+/*jslint white:false plusplus:false browser:true nomen:false sub:true*/
+/*globals paste */
+
 /**
- * Smooth scroll for anchor links
- * Ported from jawbone.ui.smoothscroll (srv)
+ * @compilation_level ADVANCED_OPTIMIZATIONS
  *
- * Supports two modes:
- * - Container mode: add data-paste-smoothscroll to a parent element
- * - Class mode: add paste-ui-smoothscroll class to a parent element
+ * Provides for smooth scrolling between specified anchors and its target.
+ * Can be used by simply adding an attribute to a parent element or by firing custom events.
+ * 
+ * @example
+ * 
+ * Easy implementation:
+ * Add 'data-paste-smoothscroll="true" to a parent element containing the anchor tags (they must be anchors).
+ * The init function will scrape for parent elements and attach the necessary events to handle anchor clicks within it.
+ * The anchor should have an href pointing to a valid ID. 
+ * 
+ * Advanced: 
+ * Use this option if you need to set an offset or if capturing all anchors within a parent is not feasible.
+ * 
+ * - Grab all the anchors you want to control, add a click event to preventDefault. 
+ * - Fire a custom 'smoothscroll' event on the window padding an object with the options below
+ * {
+ *      newURL: 'this would be the id of the target element, minus the hash sign',
+ *      verticalOffset: 'an optional vertical offset. defaults to 0'
+ * }
  *
- * Accounts for sticky nav height when calculating scroll destination.
- *
+ * @requires paste
+ * @requires paste/util
  * @requires paste/dom
  * @requires paste/event
  * @module paste/ui/smoothscroll
  */
 
-paste.define(
+paste['define'](
     'paste.ui.smoothscroll',
     [
+        'paste.util',
         'paste.dom',
         'paste.event'
     ],
-    function (module, dom, event) {
+    function (smoothscroll, util, dom, event) {
         'use strict';
 
-        var CONTAINER_ATTR_SELECTOR = '[data-paste-smoothscroll]',
-            CONTAINER_CLASS_SELECTOR = '.paste-ui-smoothscroll',
-            STICKY_CLASS = 'paste-ui-sticky-active',
-            SPEED = 30,
-            MAX_STEP = 400,
-            BRAKE_K = 2,
+        var SPEED = 50, //set here the scroll speed: when this value increase, the speed decrease.
+            MAX_STEP = 400, //set here the "uniform motion" step for long distances
+            BRAKE_K = 3, //set here the coefficient of slowing down
+
+            touchSupported = (function () {
+                // this isn't the best touch detection, but it serves our purposes here
+                return (('ontouchstart' in window) || (window['DocumentTouch'] && document instanceof DocumentTouch));
+            }()),
 
             timeout,
-            destination,
-            offset,
-            hashId,
-            updateHash,
-            prevScrollTop,
 
-            getScrollTop = function () {
-                return window.pageYOffset || document.documentElement.scrollTop;
-            },
+            $round = Math.round,
+            $min = Math.min,
+            $max = Math.max,
+            $abs = Math.abs,
 
-            getScrollHeight = function () {
-                return Math.max(
-                    document.body.scrollHeight,
-                    document.documentElement.scrollHeight
-                );
-            },
-
-            getViewportHeight = function () {
-                return window.innerHeight || document.documentElement.clientHeight;
-            },
-
-            getStickyNavHeight = function () {
-                var nav = dom.querySelector('.' + STICKY_CLASS);
-                if (!nav) {
-                    nav = dom.querySelector('.paste-ui-section-nav');
-                }
-                return nav ? nav.offsetHeight : 0;
-            },
-
-            mousewheelHandler = function () {
+            mousewheelHandler = function (e) {
                 window.clearTimeout(timeout);
                 timeout = null;
             },
+            mousewheelSub = new event['Event']['Subscription']('mousewheel', window, mousewheelHandler),
 
-            scrollTo = function () {
-                var scrollTop = getScrollTop(),
-                    hashDistance;
+            $scrollTop,
+            $hash,
 
-                if (destination > scrollTop) {
-                    hashDistance = Math.round((getScrollHeight() - (scrollTop + getViewportHeight())) / BRAKE_K);
-                    hashDistance = Math.min(Math.round((destination - scrollTop) / BRAKE_K), hashDistance);
-                    offset = Math.max(2, Math.min(hashDistance, MAX_STEP));
-                } else {
-                    offset = -Math.min(Math.abs(Math.round((destination - scrollTop) / BRAKE_K)), MAX_STEP);
+            $hashDistance,
+            $offset,
+            $verticalOffset = 0,
+            $destination,
+            scrollTo,
+            scrollHandler,
+            scrollEvent,
+            scrollSub,
+
+            $nav = dom['querySelector']('.paste-ui-section-nav'),
+
+            $hashId,
+            $updateHash,
+            hashChangeHandler = function (_, data) {
+                var updateHash = true;
+                $hash = dom['get'](data ? '#' + data['newURL'] : window.location.hash, true)[0];
+                $destination = dom['Bounds']['fromElement']($hash).top;
+
+                if (data && data['verticalOffset']) {
+                    $verticalOffset = data['verticalOffset'];
+                    $destination -= $verticalOffset;
                 }
 
-                prevScrollTop = scrollTop;
-                window.scrollTo(0, scrollTop + offset);
-
-                window.setTimeout(function () {
-                    scrollHandler();
-                }, SPEED);
-            },
-
-            scrollHandler = function () {
-                var scrollTop = getScrollTop();
-
-                if (Math.abs(scrollTop - destination) <= 1 || scrollTop === prevScrollTop) {
-                    window.scrollTo(0, destination);
-                    window.clearTimeout(timeout);
-                    timeout = null;
-
-                    if (updateHash && window.history && history.pushState) {
-                        history.pushState({}, document.title, '#' + hashId);
+                if ($hash) {
+                    if (data && data.hasOwnProperty('updateHash')) {
+                        updateHash = util['parseBoolean'](data['updateHash']);
                     }
+                    mousewheelSub['attach']();
 
-                    window.removeEventListener('mousewheel', mousewheelHandler);
-                    window.removeEventListener('wheel', mousewheelHandler);
-                } else {
-                    window.clearTimeout(timeout);
-                    timeout = setTimeout(scrollTo, SPEED);
+                    // these will be used throughout the async scroll process
+                    $hashId = $hash['id'];
+                    $updateHash = updateHash;
+
+                    // scroll action
+                    scrollTo();
                 }
             },
+            hashChangeEvent = new event['Event'](window, 'smoothscroll'),
+            hashChangeSub = hashChangeEvent['subscribe'](hashChangeHandler),
+            clickHandler,
+            clickEvents = [],
 
-            smoothScrollTo = function (targetId, verticalOffset) {
-                var target = document.getElementById(targetId) ||
-                    document.querySelector('#' + targetId);
+            init;
 
-                if (!target) {
-                    return;
+        scrollTo = function () {
+            $scrollTop = dom['getScrollTop']();
+            if (touchSupported) {
+                // don't animate if we're on a portable device
+                window.scrollTo(0, $destination);
+            } else if ($destination > $scrollTop) {
+                $hashDistance = $round((dom['getScrollHeight']() - ($scrollTop + dom['getViewportHeight']())) / BRAKE_K);
+                $hashDistance = $min($round(($destination - $scrollTop) / BRAKE_K), $hashDistance);
+                $offset = $max(2, $min($hashDistance, MAX_STEP));
+            } else {
+                $offset = -$min($abs($round(($destination - $scrollTop) / BRAKE_K)), MAX_STEP);
+            }
+
+            if (scrollSub) {
+                scrollSub['attach']();
+            } else {
+                scrollSub = scrollEvent['subscribe'](scrollHandler);
+            }
+
+            window.scrollTo(0, $scrollTop + $offset);
+
+            // cleanup if needed
+            window.setTimeout(function () {
+                scrollEvent['fire']();
+            }, 50);
+        };
+
+        scrollHandler = function (e) {
+            scrollSub['detach']();
+            if (Math.abs($scrollTop - $destination) <= 1 || dom['getScrollTop']() === $scrollTop) {
+                window.scrollTo(0, $destination);
+
+                window.clearTimeout(timeout);
+                timeout = null;
+
+                hashChangeSub['detach']();
+                // setting window.location.hash will cause the page to jump to the element and ignore the verticalOffset
+                // using push state will sacrifice support for <IE9, but it's the easiest fix for now
+                if ($updateHash && window.history && history.pushState) {
+                    history.pushState({}, document.title, "#" + $hashId);
                 }
+                hashChangeSub['attach']();
+                mousewheelSub['detach']();
 
-                var navHeight = verticalOffset || getStickyNavHeight();
+            } else {
+                window.clearTimeout(timeout);
+                timeout = setTimeout(scrollTo, SPEED);
+            }
+        };
 
-                destination = target.getBoundingClientRect().top + getScrollTop() - navHeight;
-                hashId = targetId;
-                updateHash = true;
+        clickHandler = function (e) {
+            var anchor = e.target;
 
-                window.addEventListener('mousewheel', mousewheelHandler);
-                window.addEventListener('wheel', mousewheelHandler);
+            while (anchor && anchor.nodeName !== 'A') {
+                anchor = anchor.parentNode;
+            }
 
-                scrollTo();
-            },
+            if (anchor && anchor.nodeName === 'A' && anchor.hash && anchor.hash.length > 1) {
+                e.preventDefault();
 
-            clickHandler = function (e) {
-                var anchor = e.target;
-
-                while (anchor && anchor.nodeName !== 'A') {
-                    anchor = anchor.parentNode;
-                }
-
-                if (anchor && anchor.nodeName === 'A' && anchor.hash && anchor.hash.length > 1) {
-                    e.preventDefault();
-                    smoothScrollTo(anchor.hash.slice(1));
-                }
-            },
-
-            init = function () {
-                var containers = [],
-                    attrContainers = dom.get(CONTAINER_ATTR_SELECTOR, true),
-                    classContainers = dom.get(CONTAINER_CLASS_SELECTOR, true),
-                    sectionNavs = dom.get('.paste-ui-section-nav', true);
-
-                if (attrContainers && attrContainers.length) {
-                    containers = containers.concat(Array.prototype.slice.call(attrContainers));
-                }
-                if (classContainers && classContainers.length) {
-                    classContainers.forEach(function (el) {
-                        if (containers.indexOf(el) === -1) {
-                            containers.push(el);
-                        }
-                    });
-                }
-                if (sectionNavs && sectionNavs.length) {
-                    sectionNavs.forEach(function (el) {
-                        if (containers.indexOf(el) === -1) {
-                            containers.push(el);
-                        }
-                    });
-                }
-
-                containers.forEach(function (el) {
-                    event['bind']('click', el, clickHandler);
+                hashChangeEvent['fire']({
+                    'newURL': anchor.hash.slice(1),
+                    'verticalOffset': $nav ? dom['Bounds']['fromElement']($nav).height : 0
                 });
-            };
+            }
+        };
 
-        // Initialize on DOM ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', init);
-        } else {
-            init();
-        }
+        scrollEvent = new event['Event'](window, 'scroll');
 
-        module.init = init;
-        module.scrollTo = smoothScrollTo;
+        init = (function () {
+            mousewheelSub['detach']();
+
+            // scrape the page for smoothscroll elements and fire off an event to take over the scrolling when clicked
+            util['each'](dom['querySelectorAll']('[data-paste-smoothscroll]'), function (el) {
+                clickEvents.push(new event['Event']['Subscription']('click', el, clickHandler));
+            });
+
+            // also attach to section navs
+            util['each'](dom['querySelectorAll']('.paste-ui-section-nav'), function (el) {
+                clickEvents.push(new event['Event']['Subscription']('click', el, clickHandler));
+            });
+        }());
+
+        smoothscroll.scrollTo = function (targetId, verticalOffset) {
+            hashChangeEvent['fire']({
+                'newURL': targetId,
+                'verticalOffset': verticalOffset || ($nav ? dom['Bounds']['fromElement']($nav).height : 0)
+            });
+        };
     }
 );
