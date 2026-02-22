@@ -1,0 +1,100 @@
+/**
+ * Carousel styles
+ */
+
+.paste-ui-carousel {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+}
+
+.paste-ui-carousel-items {
+  display: flex;
+  transition: transform 0.4s ease;
+  will-change: transform;
+}
+
+.paste-ui-carousel-no-transition {
+  transition: none !important;
+}
+
+.paste-ui-carousel-item {
+  flex: 0 0 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.paste-ui-carousel-control {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  border: none;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  z-index: 10;
+  font-size: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.5);
+  }
+}
+
+.paste-ui-carousel-controls-prev {
+  left: 10px;
+
+  &::before {
+    content: '\2039';
+    font-size: 24px;
+    line-height: 1;
+  }
+}
+
+.paste-ui-carousel-controls-next {
+  right: 10px;
+
+  &::before {
+    content: '\203A';
+    font-size: 24px;
+    line-height: 1;
+  }
+}
+
+.paste-ui-carousel-controls-inactive {
+  opacity: 0.3;
+  cursor: default;
+  pointer-events: none;
+}
+
+.paste-ui-carousel-indicator {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.paste-ui-carousel-indicator-item {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.4);
+  }
+}
+
+.paste-ui-carousel-indicator-item-active {
+  background: rgba(0, 0, 0, 0.6);
+}
