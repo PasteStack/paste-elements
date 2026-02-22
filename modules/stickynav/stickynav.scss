@@ -1,9 +1,9 @@
-/**
- * Sticky navigation styles
- */
+/*
+@module "paste.ui.stickynav";
+*/
 
 .paste-ui-sticky {
-  transition: position 0.2s ease, top 0.2s ease, box-shadow 0.2s ease;
+  transition: top 0.2s ease, box-shadow 0.2s ease;
 }
 
 .paste-ui-sticky-active {
