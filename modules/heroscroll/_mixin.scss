@@ -1,0 +1,89 @@
+// ==========================================================================
+// Paste Elements - Hero Scroll Mixin
+// ==========================================================================
+
+@mixin paste-ui-heroscroll(
+  $height: 80%,
+  $content-width: 976px,
+  $content-padding-x: 20px
+) {
+  .paste-ui-hero {
+    position: relative;
+    margin: 0 auto 0;
+    overflow: hidden;
+    height: $height;
+  }
+
+  .paste-ui-hero > .paste-ui-hero-content,
+  .paste-ui-hero > .paste-ui-hero-content-wrap > .paste-ui-hero-content {
+    width: $content-width;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .paste-ui-hero > .paste-ui-hero-content-wrap {
+    display: table;
+    height: 100%;
+    width: 100%;
+  }
+
+  .paste-ui-hero > .paste-ui-hero-content-wrap > .paste-ui-hero-content {
+    display: table-cell;
+    vertical-align: middle;
+    width: 100%;
+  }
+
+  .paste-ui-hero > .paste-ui-hero-content-wrap > .paste-ui-hero-content > p {
+    width: $content-width;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .paste-ui-hero .paste-ui-hero-content p {
+    margin: 1em 0;
+  }
+
+  @media (max-width: #{$content-width + ($content-padding-x * 2)}) {
+    .paste-ui-hero > .paste-ui-hero-content,
+    .paste-ui-hero > .paste-ui-hero-content-wrap > .paste-ui-hero-content {
+      width: auto;
+      padding-left: $content-padding-x;
+      padding-right: $content-padding-x;
+      -webkit-transition: font-size 250ms linear;
+      -moz-transition: font-size 250ms linear;
+      -o-transition: font-size 250ms linear;
+      transition: font-size 250ms linear;
+    }
+
+    .paste-ui-hero > .paste-ui-hero-content-wrap > .paste-ui-hero-content > p {
+      width: auto;
+    }
+  }
+
+  .paste-ui-hero[data-hero-hashclick]:hover {
+    cursor: pointer;
+  }
+
+  .paste-ui-hero[data-hero-hashclick]:last-child:hover {
+    cursor: default;
+  }
+
+  .paste-ui-hero .paste-ui-hero-image,
+  .paste-ui-hero .paste-ui-hero-basicimage {
+    position: absolute;
+    background: transparent none no-repeat scroll 50% 0;
+    background-size: cover;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    margin: 0 auto;
+    z-index: -1;
+  }
+
+  .paste-ui-hero-touch {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+}
