@@ -1,9 +1,9 @@
 /**
- * @module paste/ui/throttle
+ * @module paste/ui/utilities/throttle
  */
 
 paste.define(
-    'paste.ui.throttle',
+    'paste.ui.utilities.throttle',
     [],
     function (throttle) {
         'use strict';

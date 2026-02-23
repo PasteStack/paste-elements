@@ -1,27 +1,7 @@
-/**
- * Hero scroll styles
- */
+/*
+@module "paste.ui.heroscroll";
+*/
 
-.paste-ui-hero {
-  position: relative;
-  min-height: 50vh;
-  background-size: cover;
-  background-position: center center;
-  background-repeat: no-repeat;
-  overflow: hidden;
-  
-  &.paste-ui-hero-with-image {
-    background-attachment: scroll; // Changed by JS for parallax
-  }
-}
+@import "mixin";
 
-.paste-ui-hero-content {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  min-height: inherit;
-  padding: 2rem;
-}
+@include paste-ui-heroscroll();
