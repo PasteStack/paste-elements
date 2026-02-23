@@ -1,0 +1,90 @@
+@mixin media($media, $high-resolution: false) {
+
+    // New media queries
+    @if $media == extra-small {
+        @if $high-resolution {
+            @media screen and
+                (min-width: $breakpoint-extra-small) and (-webkit-min-device-pixel-ratio: 1.5),
+                (min-width: $breakpoint-extra-small) and (min-resolution: 1.5dppx)
+            { @content; }
+        } @else {
+            @media screen and (min-width: $breakpoint-extra-small) { @content; }
+        }
+    }
+    @if $media == small {
+        @if $high-resolution {
+            @media screen and
+                (min-width: $breakpoint-small) and (-webkit-min-device-pixel-ratio: 1.5),
+                (min-width: $breakpoint-small) and (min-resolution: 1.5dppx)
+            { @content; }
+        } @else {
+            @media screen and (min-width: $breakpoint-small) { @content; }
+        }
+    }
+    @else if $media == medium {
+        @if $high-resolution {
+            @media screen and
+                (min-width: $breakpoint-medium) and (-webkit-min-device-pixel-ratio: 1.5),
+                (min-width: $breakpoint-medium) and (min-resolution: 1.5dppx)
+            { @content; }
+        } @else {
+            @media screen and (min-width: $breakpoint-medium) { @content; }
+        }
+    }
+    @else if $media == large {
+        @if $high-resolution {
+            @media screen and
+                (min-width: $breakpoint-large) and (-webkit-min-device-pixel-ratio: 1.5),
+                (min-width: $breakpoint-large) and (min-resolution: 1.5dppx)
+            { @content; }
+        } @else {
+            @media screen and (min-width: $breakpoint-large) { @content; }
+        }
+    }
+    @else if $media == extra-large {
+        @if $high-resolution {
+            @media screen and
+                (min-width: $breakpoint-extra-large) and (-webkit-min-device-pixel-ratio: 1.5),
+                (min-width: $breakpoint-extra-large) and (min-resolution: 1.5dppx)
+            { @content; }
+        } @else {
+            @media screen and (min-width: $breakpoint-extra-large) { @content; }
+        }
+    }
+
+
+    // Original media queries
+    @if $media == mobile {
+        @if $high-resolution {
+            @media screen and (max-width: $breakpoint-mobile) { @content; }
+        }
+    }
+    @else if $media == tablet {
+        @if $high-resolution {
+            @media screen and (min-width: $breakpoint-mobile) { @content; }
+        }
+    }
+    @else if $media == desktop {
+        @if $high-resolution {
+            @media screen and (min-width: $breakpoint-desktop) { @content; }
+        }
+    }
+
+    // High pixel density display only
+    @else if $media == highres {
+        @media screen and (-webkit-min-device-pixel-ratio: 1.5), (min-resolution: 1.5dppx) { @content; }
+    }
+    // Vertical media queries
+    @else if $media == vertical-small {
+        // ex: Macbook Air 11.6"
+        @media (max-height: $breakpoint-vertical-small) { @content };
+    }
+    @else if $media == vertical-medium {
+        // ex: Macbook Air 13.3"
+        @media (min-height: $breakpoint-vertical-medium) { @content };
+    }
+    @else if $media == vertical-large {
+        // ex:
+        @media (min-height: $breakpoint-vertical-large) { @content };
+    }
+}
