@@ -1,0 +1,35 @@
+@mixin transition(
+	$value
+) {
+	@if $experimental-support-for-webkit {
+		-webkit-transition: $value;
+	}
+	@if $experimental-support-for-mozilla {
+		-moz-transition: $value;
+	}
+	@if $experimental-support-for-microsoft {
+		-ms-transition: $value;
+	}
+	@if $experimental-support-for-opera {
+		-o-transition: $value;
+	}
+	transition: $value;
+}
+@mixin transition-property(
+	$value
+) {
+	// this should really take a list and be all fancy pants
+	@if $value == transform {
+		-webkit-transition-property: -webkit-transform;
+		-moz-transition-property: -moz-transform;
+		-ms-transition-property: -ms-transform;
+		-o-transition-property: -o-transform;
+		transition-property: transform;
+	} @else {
+		-webkit-transition-property: $value;
+		-moz-transition-property: $value;
+		-ms-transition-property: $value;
+		-o-transition-property: $value;
+		transition-property: $value;
+	}
+}

@@ -1,0 +1,50 @@
+$unit-default-px: $base-font-size;
+
+@function fix8_unit_to_px($val) {
+  @if $val == auto {
+    @return $val;
+  }
+  @else {
+    @if unitless($val) {
+      @if $val == 0 { @return $val }
+      @else { @return $val * $unit-default-px}
+    } @else { @return $val}
+  }
+}
+
+@function fix8_unit_to_rem($val) {
+  @if $val == auto {
+    @return $val;
+  }
+  @else {
+    @if unitless($val) {
+      @if $val == 0 { @return $val }
+      @else { @return $val+rem}
+    } @else { @return $val}
+  }
+}
+
+@mixin px-rem($prop, $val...) {
+    $n: length($val);
+    $i: 1;
+
+    $px-list: ();
+    $rem-list: ();
+
+    @while $i <= $n {
+        $px-list: append($px-list, fix8_unit_to_px(nth($val, $i)));
+        $rem-list: append($rem-list, fix8_unit_to_rem(nth($val, $i)));
+        $i: $i + 1;
+    }
+
+    //#{$prop}: $px-list;
+    #{$prop}: $rem-list;
+}
+
+@function strip-units($number) {
+  @return $number / 1#{unit($number)};
+}
+
+@function rem($sizeValue: $base-font-size) {
+    @return (strip-units($sizeValue) / strip-units($base-font-size)) + rem;
+}
