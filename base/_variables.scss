@@ -53,3 +53,31 @@ $paste-zindex-tooltip: 1070 !default;
 // Transitions
 $paste-transition-base: all 0.2s ease-in-out !default;
 $paste-transition-fade: opacity 0.15s linear !default;
+
+// Base font size (used by _rem.scss)
+$base-font-size: 16px !default;
+
+// Legacy browser support flags (used by _badie.scss)
+$legacy-support-for-ie8: false !default;
+
+// Experimental vendor prefix flags (used by _transition.scss)
+$experimental-support-for-webkit: false !default;
+$experimental-support-for-mozilla: false !default;
+$experimental-support-for-microsoft: false !default;
+$experimental-support-for-opera: false !default;
+
+// Media query breakpoints - srv naming convention (used by _media-queries.scss)
+$breakpoint-extra-small: $paste-breakpoint-xs !default;
+$breakpoint-small: $paste-breakpoint-sm !default;
+$breakpoint-medium: $paste-breakpoint-md !default;
+$breakpoint-large: $paste-breakpoint-lg !default;
+$breakpoint-extra-large: $paste-breakpoint-xl !default;
+
+// Legacy media query breakpoints
+$breakpoint-mobile: 480px !default;
+$breakpoint-desktop: 1024px !default;
+
+// Vertical media query breakpoints
+$breakpoint-vertical-small: 650px !default;
+$breakpoint-vertical-medium: 800px !default;
+$breakpoint-vertical-large: 1000px !default;
