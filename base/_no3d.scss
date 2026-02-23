@@ -1,0 +1,5 @@
+@mixin no3d {
+    .no-threed-support {
+        @content;
+    }
+}

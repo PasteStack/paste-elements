@@ -1,0 +1,17 @@
+// ==========================================================================
+// Paste Elements - Autogrow Textarea Mixin
+// ==========================================================================
+
+@mixin paste-ui-autogrow(
+  $min-height: 80px,
+  $max-height: 400px,
+  $transition: height 0.1s ease
+) {
+  [data-paste-autogrow] {
+    min-height: $min-height;
+    max-height: $max-height;
+    overflow-y: auto;
+    resize: none;
+    transition: $transition;
+  }
+}
