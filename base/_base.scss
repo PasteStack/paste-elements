@@ -2,6 +2,16 @@
  * Base styles for paste-elements
  */
 
+// CSS Reset
+@import 'reset';
+
+// Utility mixins and functions
+@import 'rem';
+@import 'transition';
+@import 'media-queries';
+@import 'no3d';
+@import 'badie';
+
 // CSS class prefix
 $paste-prefix: 'paste-ui' !default;
 
