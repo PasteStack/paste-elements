@@ -3,8 +3,6 @@
  * Manages UI state (tabs, radio inputs) via hash with popstate/hashchange support.
  * Designed for SPA-style interfaces where form elements drive state transitions.
  *
- * Ported from up.ui.multistate (srv)
- *
  * @requires paste/util
  * @requires paste/dom
  * @requires paste/event
