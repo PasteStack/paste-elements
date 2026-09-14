@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Paste Marquee — one list, no copies</title>
+    <link rel="stylesheet" href="example.css">
+    <style>
+        body { background: #101820; color: #f2f5f7; font-family: system-ui, sans-serif; margin: 0; padding: 24px; }
+        main { margin: auto; max-width: 76rem; }
+        section { margin-block: 3rem; }
+        .paste-ui-marquee { --paste-marquee-item-width: 12rem; --paste-marquee-item-height: 6rem; }
+        .paste-ui-marquee-item { background: #182735; border: 1px solid #596979; padding: 1rem; }
+        .paste-ui-marquee-toggle { background: transparent; border: 1px solid currentColor; border-radius: .25rem; color: inherit; padding: .5rem 1rem; }
+        a { color: #9ad3ff; }
+    </style>
+    <script defer src="example.js"></script>
+</head>
+<body>
+<main>
+    <h1>One list, optional motion</h1>
+    <p>Each item exists once. CSS provides motion; the Element observes size and manages the pause control. Pause or enable reduced motion to read the whole list.</p>
+    <section aria-labelledby="continuous-title">
+        <h2 id="continuous-title">Continuous list</h2>
+        <div class="paste-ui-marquee" data-paste-marquee data-paste-marquee-duration="45">
+            <ul class="paste-ui-marquee-items" role="list" aria-label="Example partners">
+                <li class="paste-ui-marquee-item">Atlas</li>
+                <li class="paste-ui-marquee-item">Birch</li>
+                <li class="paste-ui-marquee-item">Cedar</li>
+                <li class="paste-ui-marquee-item">Delta</li>
+                <li class="paste-ui-marquee-item">Elm</li>
+                <li class="paste-ui-marquee-item">Fir</li>
+                <li class="paste-ui-marquee-item">Grove</li>
+                <li class="paste-ui-marquee-item">Harbor</li>
+                <li class="paste-ui-marquee-item">Iris</li>
+                <li class="paste-ui-marquee-item">Juniper</li>
+                <li class="paste-ui-marquee-item">Kite</li>
+            </ul>
+            <button class="paste-ui-marquee-toggle" type="button" hidden disabled>Pause motion</button>
+        </div>
+    </section>
+    <section aria-labelledby="short-title">
+        <h2 id="short-title">Insufficient coverage stays readable</h2>
+        <div class="paste-ui-marquee" data-paste-marquee>
+            <ul class="paste-ui-marquee-items" role="list" aria-label="Short collection">
+                <li class="paste-ui-marquee-item">One item</li>
+            </ul>
+            <button class="paste-ui-marquee-toggle" type="button" hidden disabled>Pause motion</button>
+        </div>
+    </section>
+    <section aria-labelledby="interactive-title">
+        <h2 id="interactive-title">Interactive content stays in normal flow</h2>
+        <div class="paste-ui-marquee" data-paste-marquee>
+            <ul class="paste-ui-marquee-items" role="list" aria-label="Useful destinations">
+                <li class="paste-ui-marquee-item"><a href="#continuous-title">Read the first example</a></li>
+                <li class="paste-ui-marquee-item"><a href="#short-title">Read the short collection</a></li>
+            </ul>
+            <button class="paste-ui-marquee-toggle" type="button" hidden disabled>Pause motion</button>
+        </div>
+    </section>
+</main>
+</body>
+</html>

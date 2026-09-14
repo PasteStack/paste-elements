@@ -1,0 +1,76 @@
+@mixin paste-ui-marquee(
+  $item-width: 13.5rem,
+  $item-height: 5rem,
+  $gap: 1rem
+) {
+  .paste-ui-marquee {
+    --paste-marquee-item-width: #{$item-width};
+    --paste-marquee-item-height: #{$item-height};
+    --paste-marquee-gap: #{$gap};
+    box-sizing: border-box;
+    contain: inline-size;
+    display: block;
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  .paste-ui-marquee-items {
+    box-sizing: border-box;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--paste-marquee-gap);
+    inline-size: 100%;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .paste-ui-marquee-item {
+    align-items: center;
+    box-sizing: border-box;
+    display: flex;
+    flex: none;
+    inline-size: min(100%, var(--paste-marquee-item-width));
+    justify-content: center;
+    min-block-size: var(--paste-marquee-item-height);
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .paste-ui-marquee-toggle {
+    font: inherit;
+    margin-block-start: 1rem;
+
+    &[hidden] {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .paste-ui-marquee[data-paste-marquee-state="running"] > .paste-ui-marquee-items {
+      block-size: var(--paste-marquee-row-height);
+      display: block;
+      overflow: hidden;
+      position: relative;
+
+      > .paste-ui-marquee-item {
+        animation: paste-ui-marquee var(--paste-marquee-duration) linear infinite;
+        animation-delay: var(--paste-marquee-delay);
+        inset-block-start: 0;
+        inset-inline-start: 0;
+        position: absolute;
+        will-change: transform;
+      }
+    }
+  }
+
+  @keyframes paste-ui-marquee {
+    from {
+      transform: translate3d(calc(var(--paste-marquee-distance) - var(--paste-marquee-item-size)), 0, 0);
+    }
+    to {
+      transform: translate3d(calc(0px - var(--paste-marquee-item-size)), 0, 0);
+    }
+  }
+}
