@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Paste Section Navigation</title>
+    <link rel="stylesheet" href="sectionnav.css">
+    <style>
+        body { margin: 0; padding-top: 50px; font-family: system-ui, sans-serif; }
+        main { margin: auto; max-width: 76rem; }
+        section { min-height: 90vh; padding: 2rem; scroll-margin-top: 50px; }
+        .paste-ui-section-nav-disclosure { position: fixed; inset: 0 0 auto; z-index: 2; }
+        .paste-ui-section-nav-toggle { padding: 0 16px; position: relative; text-decoration: none; z-index: 2; }
+        .paste-ui-section-nav-toggle-icon::before { content: "\2630"; }
+        .paste-ui-section-nav-close .paste-ui-section-nav-toggle-icon::before { content: "\00d7"; }
+    </style>
+</head>
+<body>
+<nav class="paste-ui-section-nav paste-ui-section-nav-disclosure" aria-label="Example sections">
+    <div id="example-sections" class="paste-ui-section-nav-panel" tabindex="-1">
+        <ul class="paste-ui-section-nav-items">
+            <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#first">First</a></li>
+            <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#second">Second</a></li>
+            <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#third">Third</a></li>
+            <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#fourth">Fourth</a></li>
+            <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#fifth">Fifth</a></li>
+            <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#contact">Contact</a></li>
+        </ul>
+        <p><a href="#contact">Contact</a></p>
+    </div>
+    <a id="example-sections-toggle" class="paste-ui-section-nav-toggle paste-ui-section-nav-open" href="#example-sections" aria-controls="example-sections">
+        <span class="paste-ui-section-nav-toggle-icon" aria-hidden="true"></span>
+        <span class="paste-ui-visually-hidden">Menu</span>
+    </a>
+    <a class="paste-ui-section-nav-toggle paste-ui-section-nav-close" href="#example-sections-toggle" aria-controls="example-sections">
+        <span class="paste-ui-section-nav-toggle-icon" aria-hidden="true"></span>
+        <span class="paste-ui-visually-hidden">Close menu</span>
+    </a>
+</nav>
+<main>
+    <h1>Section navigation</h1>
+
+    <section aria-labelledby="legacy-title">
+        <h2 id="legacy-title">Existing section navigation</h2>
+        <nav class="paste-ui-section-nav" aria-label="Example sections">
+            <ul class="paste-ui-section-nav-items">
+                <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#legacy-first">First section</a></li>
+                <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#legacy-second">Second section</a></li>
+            </ul>
+        </nav>
+    </section>
+
+    <section aria-labelledby="disclosure-title">
+        <h2 id="disclosure-title">Progressive disclosure navigation</h2>
+        <p>The disclosure navigation above is fixed to the top of this page. Open it with the menu control, choose a section, and it navigates and closes on its own.</p>
+    </section>
+
+    <section id="legacy-first"><h2>Legacy first section</h2></section>
+    <section id="legacy-second"><h2>Legacy second section</h2></section>
+    <section id="first"><h2>First section</h2></section>
+    <section id="second"><h2>Second section</h2></section>
+    <section id="third"><h2>Third section</h2></section>
+    <section id="fourth"><h2>Fourth section</h2></section>
+    <section id="fifth"><h2>Fifth section</h2></section>
+    <section id="contact"><h2>Contact</h2></section>
+</main>
+</body>
+</html>

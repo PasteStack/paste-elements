@@ -167,6 +167,8 @@ paste['define'](
                 anchor = anchor.parentNode;
             }
 
+            if (anchor && anchor.closest && anchor.closest('.paste-ui-section-nav-disclosure')) { return; }
+
             if (anchor && anchor.nodeName === 'A' && anchor.hash && anchor.hash.length > 1) {
                 e.preventDefault();
 
