@@ -19,6 +19,12 @@
     border-bottom: $border-bottom;
     width: 100%;
 
+    @media (max-width: ($breakpoint - 0.02px)) {
+      &.paste-ui-section-nav-disclosure {
+        display: block;
+      }
+    }
+
     @media (min-width: $breakpoint) {
       display: block;
     }
@@ -35,7 +41,7 @@
   }
 
   .paste-ui-section-nav-item {
-    a {
+    > .paste-ui-section-nav-link {
       display: block;
       padding: $link-padding;
       color: $link-color;
@@ -47,5 +53,88 @@
         color: $link-hover-color;
       }
     }
+  }
+
+  .paste-ui-section-nav-toggle {
+    display: none;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .paste-ui-section-nav-toggle-icon {
+    display: block;
+  }
+
+  .paste-ui-section-nav-panel {
+    @media (min-width: $breakpoint) {
+      display: contents;
+    }
+
+    @media (max-width: ($breakpoint - 0.02px)) {
+      display: none;
+      position: fixed;
+      inset: $height 0 0;
+      margin: 0;
+      border: 0;
+      padding: 0;
+      width: auto;
+      height: auto;
+      max-width: none;
+      background: $background;
+      color: inherit;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      flex-direction: column;
+      z-index: 1;
+
+      &:target { display: flex; }
+
+      > .paste-ui-section-nav-items {
+        flex: 0 0 auto;
+        flex-direction: column;
+        align-items: stretch;
+        height: auto;
+        margin: 0;
+        max-width: none;
+        width: 100%;
+      }
+
+      .paste-ui-section-nav-item {
+        flex: 0 0 auto;
+        > .paste-ui-section-nav-link {
+          box-sizing: border-box;
+          min-height: 44px;
+        }
+      }
+    }
+  }
+
+  @media (max-width: ($breakpoint - 0.02px)) {
+    .paste-ui-section-nav-disclosure .paste-ui-section-nav-open {
+      display: inline-flex;
+    }
+    .paste-ui-section-nav-panel:target ~ .paste-ui-section-nav-open {
+      display: none;
+    }
+    .paste-ui-section-nav-panel:target ~ .paste-ui-section-nav-close {
+      display: inline-flex;
+    }
+    html:has(.paste-ui-section-nav-panel:target) {
+      overflow: hidden;
+    }
+  }
+
+  .paste-ui-visually-hidden {
+    border: 0;
+    clip: rect(0 0 0 0);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
   }
 }

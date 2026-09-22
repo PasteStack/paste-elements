@@ -171,6 +171,52 @@ cache; `MARQUEE_CHROMIUM_EXECUTABLE` optionally selects an installed Chromium-fa
 The actual browser version, check results, and geometry evidence are written under
 `target/browser-checks/`. A missing browser is an error, not a skipped pass.
 
+## Section Navigation
+
+`modules/sectionnav` styles an in-page section nav. The plain markup is a
+`paste-ui-section-nav` list of fragment links; adding
+`paste-ui-section-nav-disclosure` opts into CSS-only progressive disclosure on
+narrow viewports. Disclosure state is the URL fragment: the panel carries the
+nav's target id, the open control links to `#<panelId>`, and the close control
+links back to the open link's own `#<panelId>-toggle` id. Both controls are
+ordinary links — Enter activates them; there is no button and no Space
+handler. The module ships no JavaScript and needs none.
+
+```html
+<nav class="paste-ui-section-nav paste-ui-section-nav-disclosure" aria-label="Sections">
+  <div id="site-sections" class="paste-ui-section-nav-panel" tabindex="-1">
+    <ul class="paste-ui-section-nav-items">
+      <li class="paste-ui-section-nav-item"><a href="#first">First section</a></li>
+    </ul>
+  </div>
+  <a id="site-sections-toggle" class="paste-ui-section-nav-toggle paste-ui-section-nav-open"
+     href="#site-sections" aria-controls="site-sections">Menu</a>
+  <a class="paste-ui-section-nav-toggle paste-ui-section-nav-close"
+     href="#site-sections-toggle" aria-controls="site-sections">Close menu</a>
+</nav>
+```
+
+Every open, close, and section selection is real fragment navigation: each
+appears in history and Back/Forward traverse them. Selecting a section both
+navigates and closes the panel, because the panel is no longer the target.
+There is no automatic Escape or click-outside dismissal — the explicit close
+link, or any other fragment navigation, closes the panel. Widening past the
+breakpoint shows the ordinary list and releases the scroll lock regardless of
+the hash; narrowing again reopens the panel while the URL still targets it,
+which is intentional rather than a state reset. The optional scroll lock is
+the mixin's `html:has(.paste-ui-section-nav-panel:target) { overflow: hidden }`
+rule — the only `:has()` use — and degrades to an unlocked menu where `:has()`
+is unsupported. Click handlers such as `paste.ui.smoothscroll` must not
+intercept these anchors; smoothscroll already skips clicks inside
+`paste-ui-section-nav-disclosure` so the browser owns disclosure navigation.
+
+Build and serve the runnable example:
+
+```sh
+node tests/build-sectionnav-example.cjs /path/to/paste-assetgraph
+python3 -m http.server 8078 --bind 127.0.0.1 --directory target/sectionnav-example
+```
+
 ## Structure
 
 | Module | Description | Key Variables |
