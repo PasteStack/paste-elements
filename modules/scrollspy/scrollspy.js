@@ -34,13 +34,14 @@ paste.define(
 
             $parent = dom['querySelector']('[data-paste-scrollspy]') || dom['querySelector']('.paste-ui-section-nav'),
             $nav = $parent,
-            scrollBreakpoints = $parent ? dom['get']('a[href^="#"]', $parent) : null,
+            scrollBreakpoints = $parent ? dom['get']('a[href^="#"]:not(.paste-ui-section-nav-toggle)', $parent) : null,
             navHeight = null,
             minWidth = $parent ? parseInt($parent.getAttribute('data-spy-min-width'), 10) : 0,
             scrollTop = dom['getScrollTop'](),
             prevScrollTop = scrollTop,
             windowWidth = dom['getViewportWidth'](),
-            touchSupported = featuredetection['touch'],
+            // data-spy-touch opts an individual nav into scrollspy on touch devices.
+            touchSupported = featuredetection['touch'] && !($parent && $parent.hasAttribute('data-spy-touch')),
             breakpoints = [],
             groups = [],
             activeGroup = null,
