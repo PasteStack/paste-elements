@@ -13,6 +13,11 @@
 - `paste.ui.scrollspy`, `paste.ui.multistate`, and
   `paste.ui.utilities.animation-frame`; utility modules moved under the
   `paste.ui.utilities.*` namespace.
+- `paste.ui.sectionnav` disclosure support: the URL fragment is the
+  browser-owned state, `:target` decides panel visibility, and picking a
+  section link closes the panel with no menu-specific JavaScript. Item
+  anchors carry `paste-ui-section-nav-link` as a styling hook, and
+  `data-spy-touch` opts a nav into scrollspy on touch devices.
 
 ## Fixed
 
