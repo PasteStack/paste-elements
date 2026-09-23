@@ -1,3 +1,29 @@
+# paste-elements v0.4.0
+
+**Date:** 2026-09-23
+
+## Added
+
+- `paste.ui.form`: a `form[data-paste-form]` inside an IO reply fragment
+  target submits through `paste.io` in the background and the returned markup
+  replaces the target's content. The request is the one the browser would have
+  sent — the submitting button's `formaction`/`formmethod`/`formenctype`/
+  `formtarget` overrides, the fields in document order, the resolved enctype —
+  so the form behaves the same without JavaScript. Only same-origin HTML,
+  including after a redirect, is placed; anything else resubmits natively so
+  the server's full page reports the outcome. Submissions the Element cannot
+  reproduce (image buttons, `text/plain` posts, other browsing contexts,
+  browsers missing a required capability) are left to the browser.
+- `paste.ui.io-reply-fragment-envelope`: applies an IO reply fragment envelope
+  reply — markup into named targets, string variables onto bound attributes —
+  only on success.
+
+## Changed
+
+- `paste.ui.marquee` no longer requires `paste.event`, and resize
+  notifications refresh on the next animation frame, so a refresh that changes
+  the observed boxes no longer triggers a ResizeObserver loop.
+
 # paste-elements v0.3.0
 
 **Date:** 2026-09-22

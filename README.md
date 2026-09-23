@@ -98,6 +98,8 @@ Processes all JS/SCSS, generates versioned output and manifest.
 | marquee | ✓ | ✓ | One semantic list with optional CSS-driven continuous motion |
 | throttle | ✓ | - | Event throttling utility (`paste.ui.utilities.throttle`) |
 | animation-frame | ✓ | - | Batches DOM writes into the next animation frame (`paste.ui.utilities.animation-frame`) |
+| form | ✓ | - | Background submit of `form[data-paste-form]` inside an IO reply fragment target (`paste.ui.form`) |
+| io-reply-fragment-envelope | ✓ | - | Applies IO reply fragment envelopes to named targets and bound attributes (`paste.ui.io-reply-fragment-envelope`) |
 
 ## Marquee
 
@@ -138,8 +140,9 @@ form controls, or other focusable content; it deliberately keeps those in normal
 `paste.ui.marquee.init(root)` returns an idempotent controller with `refresh()`, `pause()`,
 `resume()`, and `dispose()`. Call `refresh()` after changing items or configuration. Disposal
 releases observers and subscriptions, restores owned attributes/styles, and never removes caller
-content. Roots with `data-paste-marquee` initialize automatically on load, including when the
-module is loaded after the document. No global prototype is patched.
+content. Paste loads at the end of the document, after the markup it enhances, so roots with
+`data-paste-marquee` present when the module runs initialize immediately. No global prototype is
+patched.
 
 Standalone development checks (Node's built-in test runner; no npm dependencies):
 
@@ -216,6 +219,81 @@ Build and serve the runnable example:
 node tests/build-sectionnav-example.cjs /path/to/paste-assetgraph
 python3 -m http.server 8078 --bind 127.0.0.1 --directory target/sectionnav-example
 ```
+
+## Form
+
+`paste.ui.form` submits a `form[data-paste-form]` that sits inside an
+IO reply fragment target in the background and swaps the returned markup
+into that target — the same request the browser would have sent, so the form
+works identically without JavaScript.
+
+```html
+<div class="paste-ui-io-reply-fragment-target" data-paste-io-reply-fragment-target="feedback">
+  <form class="paste-ui-form" action="/feedback" method="post"
+        enctype="application/x-www-form-urlencoded" accept-charset="utf-8"
+        data-paste-form>
+    <!-- fields -->
+  </form>
+</div>
+```
+
+On submit the Element reads the submission the way the browser does: the
+submitting button's `formaction`, `formmethod`, `formenctype` and `formtarget`
+override the form's `action`, `method`, `enctype` and `target`; without either
+target the document's `<base target>` applies. A nonempty action resolves
+against the document's base URL, and an empty one is the document's URL. It
+then finds the nearest `[data-paste-io-reply-fragment-target]` ancestor and
+sends the form's fields and the submitting button's `name`/`value` in
+document order, as the browser does, through `paste.io` — URL-encoded,
+multipart, or as a query string for `method="get"`,
+matching the resolved enctype; a `get` submit replaces any query already in
+the action, as the browser would. Only `get` and `post` submissions are
+intercepted, and only when the resolved action is same-origin — only
+same-origin markup is ever placed in the page. The target is `aria-busy` for
+the duration and further submits are ignored while a request is in flight. An
+HTML response of any status whose final URL, after any redirect, is on the
+page's origin replaces the target's content, enhances forms inside it, and
+focuses the first `[role="alert"]` or `[role="status"]`. A response redirected
+off the page's origin, a non-HTML response, or a network failure resubmits the
+form natively, so the server's full-page rendering reports the outcome. An
+already default-prevented submit, a form without an IO reply fragment target,
+a browser that does not report the submitting
+button (`SubmitEvent.submitter`), a browser whose `FormData` does not take
+the submitting button (`new FormData(form, submitter)`), an image submit
+button, a `post` encoded as `text/plain`, a target naming a browsing context
+other than `_self`, or a browser missing `WeakMap`, `XMLHttpRequest`,
+`XMLHttpRequest.responseURL`, `FormData`, `URLSearchParams`, or `URL` submits
+normally — nothing is intercepted.
+
+Paste loads at the end of the document, after the markup it enhances, so forms
+present when the module runs are enhanced immediately, and forms inside a
+swapped-in IO reply fragment are enhanced as they are placed. Each form is
+enhanced once; the module exposes no public API.
+
+## IO Reply Fragment Envelope
+
+`paste.ui.io-reply-fragment-envelope` applies an IO reply fragment envelope — a
+JSON reply for updating named targets outside a form submit, such as autosave
+or paging a list.
+
+```html
+<div class="paste-ui-io-reply-fragment-target" data-paste-io-reply-fragment-target="results"><!-- markup --></div>
+<span data-paste-io-reply-fragment-bind="data-state=status"></span>
+```
+
+`paste.ui.io-reply-fragment-envelope.apply(envelope, status, root)` applies an
+envelope only when `status` and `envelope.meta.code` are both `200`. Each
+`data.fragments[name].markup` replaces the content of every
+`[data-paste-io-reply-fragment-target="name"]` inside `root` (default: the
+document) as that name is applied — a target an earlier fragment's markup
+placed is found, one it detached is not. Names with no matching target are
+skipped and `js`/`css` lists are ignored — the Element does not load them.
+It places markup only: Elements inside the placed markup, `paste.ui.form`
+included, are not enhanced. Each element carrying
+`data-paste-io-reply-fragment-bind="attribute=variable, ..."` has `attribute`
+set to `data.variables[variable]` for every variable present in the envelope
+as a string; any other value is ignored. It returns the number of target
+elements replaced, or `0` when nothing was applied.
 
 ## Structure
 

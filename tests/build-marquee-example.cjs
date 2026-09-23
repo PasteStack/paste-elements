@@ -42,6 +42,9 @@ function visit(key) {
     }
     scripts.push(content(key));
 }
+// The page calls paste.define/paste.require, so the loader is bundled first;
+// everything else arrives through the module's dependency graph.
+visit('js/paste.js');
 visit('js/paste/ui/marquee.js');
 fs.writeFileSync(path.join(output, 'example.css'), content('css/marquee.css'));
 fs.writeFileSync(path.join(output, 'example.js'), scripts.join('\n;\n') + '\n;paste.require(["paste.ui.marquee"], function (module, marquee) {});\n');
