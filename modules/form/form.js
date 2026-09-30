@@ -6,6 +6,21 @@
  * background and replace the target's content with the returned markup. Forms
  * without an IO reply fragment target, or in browsers without the required
  * capabilities, submit normally.
+ *
+ * A request that fails without a usable answer may still have delivered the
+ * submission, and a response the form cannot place — a non-HTML reply or an
+ * HTML reply from another origin — is still a transmitted POST. So one replay
+ * rule covers every failure after transmission: an automatic native resubmit
+ * happens only for a GET or a form marked data-paste-form-idempotent. Every
+ * failure first releases the busy state, then fires a bubbling, cancelable
+ * "paste.ui.form:failed" event from the form — detail.reason is one of
+ * "response", "error", "timeout" or "abort" — and a failure nobody handles
+ * gets a default alert notice inside the form, preserving entered values.
+ * Only a submit that never transmitted resubmits unconditionally.
+ *
+ * The background request carries a deadline (default 30s, per form via
+ * data-paste-form-timeout in decimal milliseconds, "0" for none) so a
+ * stalled request cannot hold the target busy forever.
  * @requires paste/io
  * @module paste/ui/form
  */
@@ -38,6 +53,30 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
 
         URLENCODED = 'application/x-www-form-urlencoded',
         MULTIPART = 'multipart/form-data',
+
+        /*
+         * Milliseconds a background submit waits for an answer before the
+         * request is treated as failed — without one, a stalled request holds
+         * aria-busy forever. data-paste-form-timeout overrides per form; only
+         * decimal digits in the XHR range are honored — "0" asks for no
+         * deadline, and blank, fractional, signed, scientific-notation,
+         * hexadecimal or overflowing input falls back to the default rather
+         * than silently disabling the deadline.
+         */
+        DEFAULT_TIMEOUT = 30000,
+
+        timeoutFor = function ($form) {
+            var declared = $form.getAttribute('data-paste-form-timeout'),
+                timeout;
+            if (declared === '0') {
+                return 0;
+            }
+            if (declared === null || declared === '' || !/^[0-9]+$/.test(declared)) {
+                return DEFAULT_TIMEOUT;
+            }
+            timeout = Number(declared);
+            return timeout >= 1 && timeout <= 4294967295 ? timeout : DEFAULT_TIMEOUT;
+        },
 
         ioReplyFragmentTarget = function ($form) {
             var $node = $form.parentElement;
@@ -109,14 +148,16 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
     /*
      * Enhance a form[data-paste-form] so a submit inside an IO reply
      * fragment target is sent through paste.io; an HTML response of any
-     * status replaces the target's content, anything else resubmits
-     * natively. Markup without data-paste-form, repeat enhancement, and
-     * browsers without WeakMap are left alone.
+     * status replaces the target's content, and every other outcome takes
+     * the gated failure path — the cancelable event, then a declared-safe
+     * native replay or the default notice. Markup without data-paste-form,
+     * repeat enhancement, and browsers without WeakMap are left alone.
      */
     enhance = function ($form) {
         var inFlight,
             bypass,
-            onSubmit;
+            onSubmit,
+            failureNotice;
 
         if (!enhanced || !$form || !$form.hasAttribute || !$form.hasAttribute('data-paste-form') || enhanced.has($form)) {
             return;
@@ -124,6 +165,9 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
 
         inFlight = false;
         bypass = false;
+        // The one notice this module may add to the form — kept across
+        // submissions so a retry replaces it rather than stacking another.
+        failureNotice = null;
 
         onSubmit = function (domEvent) {
             var $ioReplyFragmentTarget,
@@ -137,6 +181,8 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
                 fields,
                 request,
                 finish,
+                clearFailure,
+                showFailure,
                 resubmit,
                 respond,
                 fail;
@@ -203,8 +249,40 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
                 inFlight = false;
             };
 
+            /*
+             * The default outcome for a failed POST the site did not handle:
+             * an honest notice inside the form — the request may have
+             * delivered before it failed, so "check before submitting again"
+             * — focused for the announcement while every entered value and
+             * server-rendered message stays untouched. A listener that cancels
+             * the failure event suppresses this; the notice only ever replaces
+             * itself.
+             */
+            clearFailure = function () {
+                if (failureNotice && failureNotice.parentElement && failureNotice.parentElement.removeChild) {
+                    failureNotice.parentElement.removeChild(failureNotice);
+                }
+                failureNotice = null;
+            };
+
+            showFailure = function () {
+                clearFailure();
+                failureNotice = document.createElement('p');
+                failureNotice.className = 'paste-ui-form-failure';
+                failureNotice.setAttribute('role', 'alert');
+                failureNotice.setAttribute('tabindex', '-1');
+                failureNotice.textContent = 'We could not confirm your submission. It may have been received. Please check before submitting again.';
+                $form.appendChild(failureNotice);
+                if (failureNotice.focus) {
+                    failureNotice.focus();
+                }
+            };
+
+            // The submission is accepted for transmission — the notice an
+            // earlier failure left is superseded.
+            clearFailure();
+
             resubmit = function () {
-                finish();
                 submitted = false;
                 // A control named "submit" or "requestSubmit" shadows the
                 // form's own method, so the prototype methods are called
@@ -231,15 +309,27 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
                 if (settled) {
                     return;
                 }
-                settled = true;
+                // paste.io invokes this callback from readystatechange —
+                // before the browser dispatches the terminal error, timeout
+                // or abort event that carries the actual cause. A status-0
+                // "reply" is not an answer; leave the request unsettled so
+                // that terminal event names the failure.
+                if (status === 0) {
+                    return;
+                }
                 if (xhr && xhr.getResponseHeader) {
                     contentType = xhr.getResponseHeader('content-type') || '';
                     contentType = contentType.toLowerCase();
                 }
+                // An answer the form cannot place — a non-HTML reply or an
+                // HTML reply from another origin — is still a transmitted
+                // POST, so it takes the same replay rule as a transport
+                // failure rather than an unconditional native resubmit.
                 if (contentType.indexOf('text/html') !== 0 || !(xhr && fromPageOrigin(xhr.responseURL))) {
-                    resubmit();
+                    fail('response');
                     return;
                 }
+                settled = true;
                 $ioReplyFragmentTarget.innerHTML = xhr.responseText;
                 Array.prototype.forEach.call(
                     $ioReplyFragmentTarget.querySelectorAll('form[data-paste-form]'),
@@ -259,12 +349,44 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
                 finish();
             };
 
-            fail = function () {
+            /*
+             * One failure notification and one cleanup per request. The busy
+             * state clears before the event is dispatched so a listener can
+             * start another submission without meeting the in-flight guard;
+             * nothing is cleaned up after the listener returns — it may own a
+             * new request by then. Automatic replay of a transmitted request
+             * happens only where it cannot double the effect: a GET, or a
+             * form whose endpoint is declared replay-safe with
+             * data-paste-form-idempotent. Any other failure gets the default
+             * notice — an unhandled POST never ends silently.
+             *
+             * Reasons: "response" (a completed response could not be placed),
+             * "error" (transport failure), "timeout" (deadline expired),
+             * "abort" (request aborted).
+             */
+            fail = function (reason) {
+                var event;
                 if (settled) {
                     return;
                 }
                 settled = true;
-                resubmit();
+                finish();
+                if (window.CustomEvent && $form.dispatchEvent) {
+                    event = new window.CustomEvent('paste.ui.form:failed', {
+                        bubbles: true,
+                        cancelable: true,
+                        detail: {reason: reason}
+                    });
+                    $form.dispatchEvent(event);
+                    if (event.defaultPrevented) {
+                        return;
+                    }
+                }
+                if (method === 'get' || $form.hasAttribute('data-paste-form-idempotent')) {
+                    resubmit();
+                    return;
+                }
+                showFailure();
             };
 
             fields = new window.FormData($form, $submitter);
@@ -285,16 +407,39 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
             // on a status-0 reply, a reply without a Content-Type, or an
             // unparseable JSON body, so their callbacks never run; newer
             // releases call onFailure instead. The request's own events
-            // cover those replies: load fires after the final
-            // readystatechange, so it acts only when paste.io's callbacks
-            // did not. The settled guard keeps the native resubmit single.
+            // cover both: the terminal events name transport failures, and
+            // load fires after the final readystatechange — a completed
+            // response there is classified by the normal response path, and
+            // a status-0 load is the error the thrown callback never
+            // delivered. The settled guard keeps it all single.
             if (request) {
-                request.onload = fail;
-                request.onerror = fail;
-                request.ontimeout = fail;
-                request.onabort = fail;
+                try {
+                    // The returned request already sent, but the timeout
+                    // setter is legal at any point for an asynchronous XHR;
+                    // a client that refuses the assignment simply keeps no
+                    // deadline rather than losing the failure hooks — the
+                    // handlers install outside this try/catch either way.
+                    request.timeout = timeoutFor($form);
+                } catch (ignore) {}
+                request.onload = function () {
+                    if (settled) {
+                        return;
+                    }
+                    if (request.status === 0) {
+                        fail('error');
+                        return;
+                    }
+                    respond(request.responseText, request.status, request);
+                };
+                request.onerror = function () { fail('error'); };
+                request.ontimeout = function () { fail('timeout'); };
+                request.onabort = function () { fail('abort'); };
             } else {
-                fail();
+                // paste.io could not start the request at all — nothing was
+                // transmitted, so a native submission replays nothing.
+                settled = true;
+                finish();
+                resubmit();
             }
         };
 

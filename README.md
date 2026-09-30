@@ -250,12 +250,32 @@ matching the resolved enctype; a `get` submit replaces any query already in
 the action, as the browser would. Only `get` and `post` submissions are
 intercepted, and only when the resolved action is same-origin — only
 same-origin markup is ever placed in the page. The target is `aria-busy` for
-the duration and further submits are ignored while a request is in flight. An
-HTML response of any status whose final URL, after any redirect, is on the
+the duration and further submits are ignored while a request is in flight. The
+request carries a deadline — `data-paste-form-timeout` in decimal
+milliseconds on the form, default 30000; positive integers through
+4294967295 are honored and the literal `0` opts out, while blank, fractional,
+signed, scientific-notation, hexadecimal or overflowing input falls back to
+the default rather than disabling the deadline silently. A stalled request
+cannot hold the busy state forever.
+
+An HTML response of any status whose final URL, after any redirect, is on the
 page's origin replaces the target's content, enhances forms inside it, and
-focuses the first `[role="alert"]` or `[role="status"]`. A response redirected
-off the page's origin, a non-HTML response, or a network failure resubmits the
-form natively, so the server's full-page rendering reports the outcome. An
+focuses the first `[role="alert"]` or `[role="status"]`. Every other outcome
+after transmission — a network error, timeout or abort, or a response the
+form cannot place (a non-HTML reply, or an HTML reply whose final URL left
+the page's origin) — follows one rule: the busy state clears, then the form
+dispatches `paste.ui.form:failed`, a bubbling, cancelable event whose
+`detail.reason` is `"error"`, `"timeout"`, `"abort"` or `"response"`. A
+listener that calls `preventDefault()` owns the failure UX; otherwise the form
+resubmits natively only where a replay cannot duplicate the submission — a
+`get`, or a form carrying `data-paste-form-idempotent`, which declares that
+the endpoint itself collapses replays (an idempotency key or equivalent;
+the attribute alone provides no protection). Any other failure appends and
+focuses a `paste-ui-form-failure` `role="alert"` notice inside the form —
+"may have been received, check before submitting again" — preserving every
+entered value. A request that could not be transmitted at all is the single
+exception: it submits natively unconditionally, because nothing was sent.
+An
 already default-prevented submit, a form without an IO reply fragment target,
 a browser that does not report the submitting
 button (`SubmitEvent.submitter`), a browser whose `FormData` does not take
