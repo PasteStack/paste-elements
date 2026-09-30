@@ -1,3 +1,28 @@
+# paste-elements v0.5.0
+
+**Date:** 2026-09-30
+
+## Added
+
+- `paste.ui.form`: `data-paste-form-timeout` sets the intercepted
+  request's deadline in decimal milliseconds (default 30000; the literal
+  `0` opts out; malformed values fall back rather than silently
+  disabling the deadline), so a stalled request can no longer hold the
+  busy state forever.
+- `paste.ui.form`: every outcome after transmission dispatches a
+  bubbling, cancelable `paste.ui.form:failed` event whose
+  `detail.reason` is `"error"`, `"timeout"`, `"abort"` or `"response"`;
+  a listener calling `preventDefault()` owns the failure UX.
+
+## Changed
+
+- `paste.ui.form`: without a listener the form resubmits natively only
+  where a replay cannot duplicate the submission — a `get`, or a form
+  carrying `data-paste-form-idempotent` — and any other failure appends
+  and focuses a `paste-ui-form-failure` `role="alert"` notice preserving
+  every entered value. A request never transmitted still resubmits
+  natively unconditionally.
+
 # paste-elements v0.4.0
 
 **Date:** 2026-09-23
