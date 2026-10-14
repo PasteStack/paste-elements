@@ -46,7 +46,7 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
             $probeForm.appendChild($probeButton);
             try {
                 return new window.FormData($probeForm, $probeButton).has('probe');
-            } catch (ignore) {
+            } catch (ex) {
                 return false;
             }
         }()),
@@ -116,7 +116,7 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
                 url = (action === null || action === '')
                     ? new window.URL(window.location.href)
                     : new window.URL(action, document.baseURI || window.location.href);
-            } catch (ignore) {
+            } catch (ex) {
                 return null;
             }
             // Only same-origin markup is ever placed in the page.
@@ -130,7 +130,7 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
         fromPageOrigin = function (href) {
             try {
                 return new window.URL(href).origin === window.location.origin;
-            } catch (ignore) {
+            } catch (ex) {
                 return false;
             }
         },
@@ -293,7 +293,7 @@ paste.define('paste.ui.form', ['paste.io'], function (form, io) {
                     try {
                         window.HTMLFormElement.prototype.requestSubmit.call($form, $submitter || undefined);
                         submitted = true;
-                    } catch (ignore) {
+                    } catch (ex) {
                         submitted = false;
                     }
                     bypass = false;
