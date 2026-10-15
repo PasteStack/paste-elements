@@ -7,15 +7,6 @@ const vm = require('node:vm');
 function fixture(options = {}) {
     const listeners = new Map();
     const observers = [];
-    const frames = new Map();
-    const scheduled = [];
-    const cancelled = [];
-    let frameId = 0;
-    function flushFrames() {
-        const pending = [...frames.values()];
-        frames.clear();
-        pending.forEach(fn => fn());
-    }
     const style = () => {
         const values = new Map();
         return {
@@ -27,7 +18,7 @@ function fixture(options = {}) {
     };
     function element(className, width, height = 80) {
         const attributes = new Map();
-        const el = {
+        return {
             className, style: style(), children: [], parentElement: undefined,
             hidden: false, disabled: false, textContent: '',
             clientWidth: width,
@@ -37,15 +28,14 @@ function fixture(options = {}) {
             removeAttribute: key => attributes.delete(key),
             matches: selector => selector === '.' + className,
             querySelector: () => null,
-            contains(node) { return node === el || el.children.includes(node); },
-            getBoundingClientRect() { return {width: el.clientWidth, height}; },
-            addEventListener(type, fn) { listeners.set(el.className + ':' + type, fn); },
+            contains(node) { return node === this || this.children.includes(node); },
+            getBoundingClientRect() { return {width: this.clientWidth, height}; },
+            addEventListener(type, fn) { listeners.set(this.className + ':' + type, fn); },
             removeEventListener(type, fn) {
-                const key = el.className + ':' + type;
+                const key = this.className + ':' + type;
                 if (listeners.get(key) === fn) listeners.delete(key);
             }
         };
-        return el;
     }
     const root = element('paste-ui-marquee', options.width || 600);
     root.setAttribute('data-paste-marquee', '');
@@ -67,50 +57,45 @@ function fixture(options = {}) {
         removeEventListener(type) { listeners.delete('media:' + type); }
     };
     const document = {
+        readyState: options.readyState || 'loading',
         activeElement: null,
-        querySelectorAll: () => (options.autoInit === false ? [] : [root])
+        querySelectorAll: () => [root],
+        addEventListener(type, fn) { listeners.set('document:' + type, fn); },
+        removeEventListener(type, fn) {
+            if (listeners.get('document:' + type) === fn) listeners.delete('document:' + type);
+        }
     };
     const window = {
         WeakMap,
         CSS: {supports: () => true},
         getComputedStyle: () => ({columnGap: '16px'}),
         matchMedia: () => media,
-        requestAnimationFrame(fn) {
-            frameId += 1;
-            frames.set(frameId, fn);
-            scheduled.push(frameId);
-            return frameId;
-        },
-        cancelAnimationFrame(id) {
-            if (frames.delete(id)) {
-                cancelled.push(id);
-            }
-        },
-        ResizeObserver: function (fn) {
-            const targets = new Set();
-            const observer = {
-                callback: fn,
-                targets,
-                observe(target) { targets.add(target); },
-                unobserve(target) { targets.delete(target); },
-                disconnect() { targets.clear(); }
-            };
-            observers.push(observer);
-            return observer;
+        ResizeObserver: class {
+            constructor(fn) { this.callback = fn; this.targets = new Set(); observers.push(this); }
+            observe(target) { this.targets.add(target); }
+            unobserve(target) { this.targets.delete(target); }
+            disconnect() { this.targets.clear(); }
         }
     };
     if (options.unsupported) window.ResizeObserver = undefined;
     const exports = {};
-    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../modules/marquee/marquee.js'), 'utf8'), {
-        window, document, WeakMap, isFinite, Number, console,
-        paste: {define(name, deps, factory) {
-            assert.equal(name, 'paste.ui.marquee');
-            assert.equal(deps.length, 0);
-            factory(exports);
+    const subscriptions = [];
+    const event = {
+        DocumentEvent: {loaded: fn => { subscriptions.push(fn); }},
+        Event: {Subscription: function (type, target, handler) {
+            target.addEventListener(type, handler);
+            this.remove = () => target.removeEventListener(type, handler);
         }}
+    };
+    // Authored state a test plants must exist before the module defines:
+    // the footer convention means markup — and its styles — precede the
+    // module, and define is when initialization reads them.
+    if (options.beforeDefine) { options.beforeDefine({root, list, toggle}); }
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../modules/marquee/marquee.js'), 'utf8'), {
+        window, document, WeakMap, isFinite, console,
+        paste: {define(name, deps, factory) { assert.equal(name, 'paste.ui.marquee'); factory(exports, event); }}
     });
-    // Roots present when the module runs are initialized during evaluation.
-    return {root, list, toggle, media, document, exports, listeners, observers, element, frames, scheduled, cancelled, flushFrames};
+    return {root, list, toggle, media, document, exports, listeners, observers, subscriptions, element};
 }
 
 test('one original per item, idempotent initialization, CSS geometry and offscreen endpoints', () => {
@@ -179,65 +164,18 @@ test('resize changes eligibility without writing every-frame positions', () => {
     f.exports.init(f.root);
     f.list.clientWidth = 1200;
     f.observers[0].callback();
-    f.flushFrames();
     assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'static');
     f.list.clientWidth = 600;
     f.observers[0].callback();
-    f.flushFrames();
     assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'running');
-});
-
-test('a resize notification refreshes on the next frame, not synchronously', () => {
-    const f = fixture();
-    f.exports.init(f.root);
-    f.list.clientWidth = 1200;
-    f.observers[0].callback();
-    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'running');
-    f.flushFrames();
-    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'static');
-});
-
-test('notifications before the frame runs coalesce into one refresh', () => {
-    const f = fixture();
-    f.exports.init(f.root);
-    f.list.clientWidth = 1200;
-    f.observers[0].callback();
-    f.observers[0].callback();
-    f.observers[0].callback();
-    assert.equal(f.scheduled.length, 1);
-    f.flushFrames();
-    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'static');
-    f.flushFrames();
-    assert.equal(f.scheduled.length, 1);
-});
-
-test('dispose cancels a pending resize refresh', () => {
-    const f = fixture();
-    const control = f.exports.init(f.root);
-    f.list.clientWidth = 1200;
-    f.observers[0].callback();
-    control.dispose();
-    assert.deepEqual(f.cancelled, [f.scheduled[0]]);
-    f.flushFrames();
-    assert.equal(f.root.hasAttribute('data-paste-marquee-state'), false);
-});
-
-test('a notification after dispose schedules nothing', () => {
-    const f = fixture();
-    const control = f.exports.init(f.root);
-    control.dispose();
-    f.observers[0].callback();
-    assert.equal(f.scheduled.length, 0);
-    assert.equal(f.frames.size, 0);
 });
 
 test('refresh owns only its properties and disposal restores originals and subscriptions', () => {
-    // autoInit: false keeps init manual so the owned-property snapshot happens
-    // after the important inline value is in place.
-    const f = fixture({autoInit: false});
+    const f = fixture({beforeDefine: ({list}) => {
+        list.children[0].style.setProperty('--paste-marquee-delay', '12s', 'important');
+        list.style.setProperty('color', 'red');
+    }});
     const first = f.list.children[0];
-    first.style.setProperty('--paste-marquee-delay', '12s', 'important');
-    f.list.style.setProperty('color', 'red');
     const control = f.exports.init(f.root);
     const removed = f.list.children.pop();
     control.refresh();
@@ -290,20 +228,29 @@ test('leaving focus re-evaluates eligibility instead of holding a pause nobody c
     assert.equal(f.toggle.textContent, 'Resume motion');
 });
 
-test('roots present when the module runs are initialized at module evaluation', () => {
+test('initialization is immediate at define — the footer convention places markup first', () => {
     const f = fixture();
+    // The module binds whatever declarations exist at define time;
+    // there is no parse event to wait for and no readiness surface.
     assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'running');
+    assert.equal(f.listeners.get('document:DOMContentLoaded'), undefined);
     assert.equal(f.observers.length, 1);
-    assert.equal(typeof f.listeners.get('paste-ui-marquee-toggle:click'), 'function');
+});
+
+test('late-loaded module initializes even after the shared load event fired', () => {
+    const f = fixture({readyState: 'complete'});
+    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'running');
+    assert.equal(f.subscriptions.length, 0);
+    assert.equal(f.observers.length, 1);
     f.exports.init(f.root);
     assert.equal(f.observers.length, 1);
 });
 
 test('owned important geometry and delays are removed before replacement and restored on disposal', () => {
-    // autoInit: false so init snapshots these important values as pre-existing.
-    const f = fixture({autoInit: false});
-    f.list.style.setProperty('--paste-marquee-distance', '9px', 'important');
-    f.list.children[0].style.setProperty('--paste-marquee-delay', '7s', 'important');
+    const f = fixture({beforeDefine: ({list}) => {
+        list.style.setProperty('--paste-marquee-distance', '9px', 'important');
+        list.children[0].style.setProperty('--paste-marquee-delay', '7s', 'important');
+    }});
     const control = f.exports.init(f.root);
     assert.equal(f.list.style.getPropertyValue('--paste-marquee-distance'), '1296px');
     assert.equal(f.list.style.getPropertyPriority('--paste-marquee-distance'), '');

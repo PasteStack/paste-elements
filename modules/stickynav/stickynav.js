@@ -49,6 +49,10 @@ paste.define(
             init,
             navStuckEvent,
             navUnstuckEvent,
+            firstScroll,
+            sentinel,
+            applyPending,
+            applyClass,
             calculateTopOffset,
             calculateWindowWidth,
             FIXED_NAV_CLASS = "paste-fixed-subnav",
@@ -71,12 +75,22 @@ paste.define(
         windowTop = dom['getScrollTop']();
 
         calculateTopOffset = function () {
-            if ($stickyNav.stuck === true) { return; }
-
+            var anchorStyle;
             navBounds = dom['Bounds']['fromElement'](nav);
 
             offset = navBounds.height;
 
+            // While stuck the target's own rect can be a fixed-position
+            // viewport coordinate, so the normal-flow marker holds the
+            // threshold's anchor in every state. It sits at the slot's
+            // margin edge — the target's own top margin still applies
+            // between them, so it is added back here.
+            if (sentinel) {
+                anchorStyle = window.getComputedStyle ? window.getComputedStyle($stickyNav) : null;
+                topOffset = dom['Bounds']['fromElement'](sentinel).top +
+                    (anchorStyle ? parseFloat(anchorStyle.marginTop) || 0 : 0) - offset;
+                return;
+            }
             topOffset = dom['Bounds']['fromElement']($stickyNav).top - offset;
         };
 
@@ -84,18 +98,45 @@ paste.define(
             windowWidth = dom['getViewportWidth']();
         };
 
+        // The class write is one coalesced apply: whatever the latest
+        // transition decided is what the frame performs, so a callback
+        // queued before a correction can never add the class back over
+        // a nav that has since unstuck.
+        applyPending = false;
+        applyClass = function () {
+            if (applyPending) { return; }
+            applyPending = true;
+            animation_frame.request(function () {
+                applyPending = false;
+                if ($stickyNav.stuck === true) {
+                    $body.classList.add(FIXED_NAV_CLASS);
+                } else {
+                    $body.classList.remove(FIXED_NAV_CLASS);
+                }
+            });
+        };
+
         handler = function () {
-            if (windowWidth <= minWidth) { return; }
             windowTop = dom['getScrollTop']();
+
+            if (windowWidth <= minWidth) {
+                // Below the declared minimum the enhancement is
+                // ineligible — and ineligibility is a state, not an
+                // absence of input: a nav that was stuck comes back
+                // through the same coalesced write as any transition.
+                if ($stickyNav.stuck === true) {
+                    $stickyNav.stuck = false;
+                    applyClass();
+                }
+                return;
+            }
 
             if (windowTop >= topOffset) {
                 if (!$stickyNav.stuck) {
                     // only hit the DOM if we need to
-                    animation_frame.request(function () {
-                        $body.classList.add(FIXED_NAV_CLASS);
-                    });
+                    $stickyNav.stuck = true;
+                    applyClass();
                 }
-                $stickyNav.stuck = true;
 
                 navStuckEvent = new event['Event'](window, 'navStuck');
                 navStuckEvent['fire']($stickyNav);
@@ -105,9 +146,9 @@ paste.define(
             } else if (windowTop < topOffset) {
                 if ($stickyNav.stuck === true) {
                     // only hit the DOM if we need to
-                    $body.classList.remove(FIXED_NAV_CLASS);
+                    $stickyNav.stuck = false;
+                    applyClass();
                 }
-                $stickyNav.stuck = false;
 
                 navUnstuckEvent = new event['Event'](window, 'navUnstuck');
                 navUnstuckEvent['fire']($stickyNav);
@@ -132,21 +173,57 @@ paste.define(
             desktop_nav.appendChild(clone);
         };
 
-        // Call the handler on load just for fun
+        // The markup this enhances already exists when the module
+        // defines — the subscriptions go live now rather than after
+        // window load, so unrelated image or resource fetching can
+        // never postpone the nav becoming sticky-aware. topOffset is
+        // measured once here and re-derived by resizeHandler on every
+        // resize; scrolls re-evaluate against the cached threshold and
+        // recalibrate it once on the first real scroll — a rect read
+        // per scroll event would be a layout pass on the hot path.
         init = (function () {
             // clearing this cache just in case it gets cached with the page
             $body.classList.remove(FIXED_NAV_CLASS);
 
             buildFixedNav();
 
-            event['DocumentEvent']['loaded'](function () {
-                scrollSub = new event['Event']['Subscription']('scroll', window, handler);
-                resizeSub = new event['Event']['Subscription']('resize', window, resizeHandler);
+            // The recalibration passes (first scroll, load, resize) all
+            // need a measurement that stays honest while the nav is
+            // stuck — a stuck target's own position can be fixed to the
+            // viewport, telling it nothing about where it left normal
+            // flow. The zero-height marker inserted just before the
+            // target keeps the slot's document position readable in
+            // every state and costs one read only when a recalibration
+            // actually runs.
+            sentinel = document.createElement('div');
+            sentinel.setAttribute('aria-hidden', 'true');
+            sentinel.style.cssText = 'height:0;width:0;margin:0;padding:0;visibility:hidden;overflow:hidden;line-height:0;';
+            if ($stickyNav.parentNode) {
+                $stickyNav.parentNode.insertBefore(sentinel, $stickyNav);
+            } else {
+                sentinel = null;
+            }
 
-                // This is sucky, but heroscroll forces the browser to scroll to the top after 20ms,
-                // so I need to wait until that's done to take measurements
-                resizeHandler();
+            firstScroll = true;
+            scrollSub = new event['Event']['Subscription']('scroll', window, function () {
+                // The define-time measure can predate late resources —
+                // recalibrate once on the first real scroll so a layout
+                // that shifted the nav never sticks at a stale threshold.
+                if (firstScroll) {
+                    firstScroll = false;
+                    calculateTopOffset();
+                }
+                handler();
             });
+            resizeSub = new event['Event']['Subscription']('resize', window, resizeHandler);
+
+            resizeHandler();
+
+            // One more recalibration after resources settle: late CSS,
+            // fonts or images can shift the nav's position without
+            // firing resize. This corrects the threshold only — the
+            // enhancement itself never waits on load.
+            event['DocumentEvent']['loaded'](resizeHandler);
         }());
     }
 );
