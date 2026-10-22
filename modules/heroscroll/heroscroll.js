@@ -1,488 +1,931 @@
+/*jslint browser:true plusplus:true sub:true unparam:true */
+/*globals paste */
+
 /**
- * Hero scroll parallax effect
- * @requires paste/guid
+ * Hero scroll parallax effect.
+ *
+ * Markup: elements carrying the paste-ui-hero class, each with an
+ * optional .paste-ui-hero-image and .paste-ui-hero-content child.
+ *
+ *   force-full-height        (attribute on the image) — the image's
+ *                            inline height follows the viewport height.
+ *                            This is geometry, not motion: it is applied
+ *                            at bind and re-applied on resize, whatever
+ *                            the reduced-motion preference. On touch
+ *                            devices it is re-applied only when the
+ *                            viewport width or the screen orientation
+ *                            changes — a height-only resize there is the
+ *                            browser toolbar showing or hiding, and
+ *                            following it would shift the content below
+ *                            the hero mid-scroll.
+ *   data-hero-image-fixed    (image) — no parallax background position.
+ *   data-hero-image-fade     (image) — the image fades as the hero
+ *                            leaves the viewport.
+ *   data-hero-min-opacity    (image) — a plain decimal from 0 to 1:
+ *                            digits with an optional fraction ('0.25',
+ *                            '.25', '1.'), read untrimmed. The fade
+ *                            never writes an opacity below it (default
+ *                            0). Any other spelling, or a value above 1,
+ *                            is the default.
+ *   data-hero-hashclick      (hero) — see "Hash click" below.
+ *
+ * Motion effects — the content fade, the image fade and the background
+ * parallax — are owned inline writes: the first write captures the
+ * authored inline value and priority, and releasing the effect writes
+ * them back unless another writer replaced the declaration since. Every
+ * owned value is written in a canonical form (opacity to three decimal
+ * places, the background offset in whole pixels) that the style
+ * interface serializes unchanged, so ownership is judged against the
+ * value written; the declaration is read back only when an effect is
+ * released. A content box in the band where no fade rule applies
+ * (entering from the bottom fold) has its owned opacity released, so the
+ * authored value shows rather than a stale fade.
+ *
+ * Parallax base offset: the image's computed background-position is read
+ * once, at the first measure, before any parallax write. A single-layer value whose vertical component is in
+ * px is the base the parallax offsets from; a percentage or keyword
+ * vertical component, or a multi-layer value, contributes no base offset
+ * (0) — the module never reads a percentage as pixels. The parallax
+ * write itself is one layer: '50% <offset>px', with
+ * background-attachment fixed, written once when the parallax takes
+ * ownership. A frame whose rounded offset is unchanged writes nothing.
+ *
+ * Reduced motion: the effects run only while the
+ * prefers-reduced-motion preference is observable and not 'reduce', as
+ * paste.ui.utilities.mediaquery reports it — an unobservable preference
+ * counts as reduced. The preference is kept from the change listener and
+ * re-read once per frame, never per scroll event. While the effects
+ * stand down no motion frame is
+ * armed at all; a resize still arms one frame for the geometry work
+ * above. The frame is one phased animation-frame request: its reads run
+ * before any module writes. A resize that changes the full-height
+ * override writes it in that frame and measures the bounds it moved in
+ * the next frame's read phase, never by reading back its own write.
+ *
+ * Late layout: the hero bounds are measured at bind and re-measured
+ * whenever the document body changes size — an image or a web font
+ * arriving above a hero, or content added to the page — through one
+ * ResizeObserver on the body, and once more when the document's own
+ * load completes, since a resource landing inside a box whose size is
+ * fixed moves a hero without resizing the body. Either input only
+ * marks the bounds stale and arms the frame, as a resize does; a
+ * module defined after load needs no load pass. Without these, a
+ * hero's content could keep the opacity of the position it had before
+ * the page settled.
+ *
+ * Touch devices (paste.has) get the touch class and no motion effects:
+ * no scroll listener and no preference observation. A resize listener
+ * is bound on touch devices only when a hero image carries
+ * force-full-height, for that geometry alone.
+ *
+ * Loaded marker: the paste-ui-heroscroll-loaded class is written to the
+ * element dom.getDocumentBody() returns (the root element in standards
+ * mode) and to body whenever the module defines, whether or not the page
+ * has heroes — pages gate presentation on it.
+ *
+ * Hash click (inherited from the original heroscroll): on a non-touch
+ * device, a click inside a hero carrying data-hero-hashclick whose next
+ * element sibling — resolved when the click happens — is a connected
+ * hero prevents the click's default and navigates to that hero
+ * natively. A next hero with an id is a fragment navigation to it (the
+ * hash setter: the address and history update, :target and hashchange
+ * follow, and the page's scroll-behavior and scroll-margin apply); when
+ * the address already carries that fragment the hero is scrolled into
+ * view with scrollIntoView() and no history entry. A hero with no id
+ * gets a history entry of its own (pushState, carrying the current
+ * history state) and is then scrolled into view, so each Back returns
+ * to the hero the visitor left. The entry keeps the current address,
+ * except that a fragment naming an element (an id or an a element's
+ * name, raw or percent-decoded, and in a quirks-mode document an a
+ * element's name that matches once each code point is folded to the
+ * lowercase of its uppercase form, as Chromium mostly resolves it
+ * there) or the top of the document becomes the empty
+ * fragment: the entry does not show that element, and an engine that
+ * scrolls to an entry's fragment on traversal would show it
+ * instead of the hero. Any other fragment, such as another script's
+ * state tokens, is kept, and an address with a '#' keeps it, so the
+ * entry reads as a bare address only when the visitor was on one.
+ * That hero also carries the paste-ui-hero-destination class until the
+ * next hash click, the hook the paste.ui.sectionnav stylesheet's target
+ * clearance uses for a hero that is not a target.
+ * The module never stamps generated ids on heroes and fires no event
+ * of its own. A click whose path — the composed path where the
+ * platform reports one, so a control inside a shadow root counts —
+ * passes through an interactive element within the hero (a[href],
+ * area[href], an SVG a with href or xlink:href, button, input, select,
+ * textarea, label, summary, audio[controls], video[controls], iframe,
+ * object, embed, [tabindex], [contenteditable]) is never prevented and
+ * navigates nowhere.
+ *
  * @requires paste/util
  * @requires paste/dom
  * @requires paste/event
+ * @requires paste/has
+ * @requires paste/ui/utilities/animation-frame
+ * @requires paste/ui/utilities/mediaquery
  * @requires polyfills/getcomputedstyle
  * @module paste/ui/heroscroll
  */
-
-/*region Hero Scroll*/
 paste['define'](
     'paste.ui.heroscroll',
     [
-        'paste.guid',
         'paste.util',
         'paste.dom',
         'paste.event',
+        'paste.has',
+        'paste.ui.utilities.animation-frame',
+        'paste.ui.utilities.mediaquery',
         'polyfills.getcomputedstyle'
     ],
-    function (heroscroll, guid, util, dom, event, _) {
+    function (heroscroll, util, dom, event, has, animation_frame, mediaquery, getComputedStylePolyfill) {
         'use strict';
 
-
-        var html = dom['getDocumentBody'](),
-            body = document.getElementsByTagName('body')[0],
+        var $w = window,
+            $d = document,
+            $math = Math,
+            $min = $math.min,
+            $max = $math.max,
+            $round = $math.round,
+            $parseFloat = parseFloat,
+            $decodeURIComponent = decodeURIComponent,
+            $String = String,
+            $Number = Number,
+            $keys = Object['keys'],
+            NativeResizeObserver = $w['ResizeObserver'],
+            Subscription = event['Event']['Subscription'],
+            requestPhased = animation_frame['requestPhased'],
+            boundsFromElement = dom['Bounds']['fromElement'],
+            html = dom['getDocumentBody'](),
+            body = $d.getElementsByTagName('body')[0],
+            bodyStyle = $d.body.style,
             OVERRIDE_IMAGE_HEIGHT_FLAG = 'force-full-height',
+            LOADED_CLASS = 'paste-ui-heroscroll-loaded',
             HERO_CLASS = 'paste-ui-hero',
             HERO_TOUCH_CLASS = HERO_CLASS + '-touch',
             HERO_IMAGE_CLASS = HERO_CLASS + '-image',
             HERO_CONTENT_CLASS = HERO_CLASS + '-content',
+            HERO_DESTINATION_CLASS = HERO_CLASS + '-destination',
+            DECIMAL = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/,
+            PIXELS = /^(-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))px$/,
+            INTERACTIVE_TAG = /^(?:BUTTON|INPUT|SELECT|TEXTAREA|LABEL|SUMMARY|IFRAME|OBJECT|EMBED)$/,
+            BACKGROUND_MULTIPLIER = 0.3,
+            touchSupported = !!has['touch'],
+            backgroundSizeSupported = typeof bodyStyle['backgroundSize'] === 'string',
+            opacitySupported = typeof bodyStyle['opacity'] === 'string',
+            opacityProperty = opacitySupported ? 'opacity' : 'filter',
 
+            heroList = null,
+            motion = null,
+            // The preference as the change listener and the last frame
+            // left it: scroll input reads this, never the query.
+            motionOn = false,
+            framePending = false,
+            // Resize input performs no geometry work of its own: it
+            // marks the cache stale and arms the owned frame, so a burst
+            // of resize events recalibrates once.
+            geometryDirty = false,
+            // Whether any hero declares the full-height override, fixed
+            // at discovery.
+            fullHeight = false,
+            // The full-height override last written, so an unchanged
+            // viewport height writes nothing.
+            writtenHeight,
+            // The viewport width and screen orientation the override
+            // was last written for: on touch, only a change to either
+            // re-applies it.
+            writtenShape,
+            // The hero bounds wait on a read phase: set when geometry
+            // moved, cleared once a read phase with no height write
+            // still to land has measured.
+            measurePending = false,
+            // The read phase's snapshot, carried to the same frame's
+            // write phase.
+            passHeight,
+            passMotion = false,
+            passScrollTop = 0,
+            passOffsetTop = 0,
+            passViewport = 0,
+            // Assigned after the frame phases it arms.
+            requestHeroFrame,
 
-        // this isn't the best touch detection, but it serves our purposes here
-            touchSupported = (function() {
-                return (('ontouchstart' in window) || (window['DocumentTouch'] && document instanceof DocumentTouch));
-            }()),
+            // Listeners that live as long as the page.
+            pageSubscriptions = [],
+            // The body's size watch, page-lifetime like the listeners.
+            bodyObserver = null,
+            // The hero without an id a hash click last scrolled to: it
+            // carries the destination class, the target clearance's hook,
+            // until the next hash click.
+            destinationHero = null,
 
-
-            backgroundSizeSupported = (function () {
-                var undef;
-                return document.body.style['backgroundSize'] !== undef;
-            }()),
-
-
-
-
-            opacitySupported = (function () {
-                var undef;
-                return document.body.style['opacity'] !== undef;
-            }()),
-
-
-
-
-        /*
-         * OPACITY ANIMATION
-         */
-            setOpacity = function (element, value) {
-                if (opacitySupported) {
-                    element.style.opacity = value / 100;
+            /*
+             * HERO CLICK
+             */
+            // Case folding by code point, as an engine that matches
+            // names without regard to case in quirks mode compares
+            // them: each code point becomes the lowercase of its
+            // uppercase form, so the long s, the Kelvin sign, final
+            // sigma, the micro sign and letters outside the basic plane
+            // fold with their letters. A code point whose case forms
+            // change its length, and the dotless i, which has no
+            // folding, stay as they are. Chromium also matches a few
+            // equal-length pairs that need full folding (some
+            // ligatures, Greek letters with diacritics); those are not
+            // looked up.
+            caseFold = function (text) {
+                var folded = '',
+                    remaining = text.length,
+                    index = 0,
+                    code,
+                    unit,
+                    upper,
+                    lower;
+                while (remaining--) {
+                    unit = text.charAt(index);
+                    code = text.charCodeAt(index);
+                    index += 1;
+                    // A surrogate pair is one code point.
+                    if (code >= 0xD800 && code <= 0xDBFF && remaining > 0) {
+                        code = text.charCodeAt(index);
+                        if (code >= 0xDC00 && code <= 0xDFFF) {
+                            unit += text.charAt(index);
+                            index += 1;
+                            remaining -= 1;
+                        }
+                    }
+                    upper = unit.toUpperCase();
+                    lower = upper.length === unit.length ? upper.toLowerCase() : unit.toLowerCase();
+                    folded += unit === '\u0131' || lower.length !== unit.length ? unit : lower;
+                }
+                return folded;
+            },
+            // Whether a fragment names an element as the browser looks
+            // it up: an id, else an a element with that name. In a
+            // quirks-mode document some engines also take an a element
+            // whose name matches without regard to case, as
+            // paste.ui.smoothscroll does there, so that counts too.
+            namesElement = function (name) {
+                var named,
+                    folded,
+                    remaining,
+                    index = 0;
+                if ($d.getElementById(name)) {
+                    return true;
+                }
+                named = $d.getElementsByName(name);
+                remaining = named.length;
+                while (remaining--) {
+                    if (named[index].nodeName === 'A') {
+                        return true;
+                    }
+                    index += 1;
+                }
+                if ($d['compatMode'] !== 'BackCompat') {
+                    return false;
+                }
+                named = $d.getElementsByTagName('a');
+                folded = caseFold(name);
+                remaining = named.length;
+                index = 0;
+                while (remaining--) {
+                    if (caseFold(named[index].getAttribute('name') || '') === folded) {
+                        return true;
+                    }
+                    index += 1;
+                }
+                return false;
+            },
+            // The address for a hero's own entry. A fragment that names
+            // an element, raw or percent-decoded, or the top of the
+            // document, gives way to an empty one ('page#'): an engine
+            // that scrolls to an entry's fragment on traversal would
+            // show that element instead of the hero, and the address
+            // would name what the entry does not show. Any other
+            // fragment, such as another script's state tokens, stays,
+            // and so does the '#': the entry reads as the page's bare
+            // first entry only when the visitor left that entry.
+            entryAddress = function (href, fragment) {
+                var decoded = fragment;
+                try {
+                    decoded = $decodeURIComponent(fragment);
+                } catch (malformed) {
+                    decoded = fragment;
+                }
+                if (fragment && (namesElement(fragment) || namesElement(decoded) ||
+                        decoded.toLowerCase() === 'top')) {
+                    return href.slice(0, href.indexOf('#') + 1);
+                }
+                return href;
+            },
+            // Native navigation to the next hero. A hero with an id is
+            // a fragment navigation — the address, history, :target and
+            // hashchange follow, and the page's scroll CSS applies; the
+            // hash setter does nothing for the fragment already current,
+            // so an unchanged address scrolls instead. A hero without
+            // an id has no address of its own: it gets a history entry
+            // before it is scrolled into view, so the entry the visitor
+            // leaves keeps its own position and Back returns to each
+            // hero in turn. A history that refuses the entry still
+            // scrolls.
+            goToHero = function (next) {
+                var location = $w.location,
+                    history = $w.history,
+                    before = location.hash,
+                    href = location.href;
+                if (destinationHero) {
+                    dom['removeCssClass'](destinationHero, HERO_DESTINATION_CLASS);
+                    destinationHero = null;
+                }
+                if (next.id) {
+                    location.hash = next.id;
+                    if (location.hash !== before) {
+                        return;
+                    }
                 } else {
-                    element.style.filter = 'alpha(opacity=' + value + ')';
-                }
-            },
-            $transitionOpacityInterval,
-            $transitionOpacityFunc = function (element, value) {
-                $transitionOpacityInterval = window.setTimeout((function (element, value) {
-                    return function () {
-                        window.clearTimeout($transitionOpacityInterval);
-                        $transitionOpacityInterval = null;
-                        setOpacity(element, value);
-                    };
-                }(element, value)), value * 10);
-            },
-            transitionOpacity = function (element, start, end) {
-                setOpacity(element, start);
-                var i, len = end;
-                for (i = 1; i <= len; i += 1) {
-                    $transitionOpacityFunc(element, i);
-                }
-
-
-                return end;
-            },
-
-
-
-
-        /*
-         * HERO MODULE CLICK
-         */
-            $heroIdChange,
-            dispatchHeroIdChange = function (heroId) {
-                $heroIdChange = new event['Event'](window, 'hashchange');
-                $heroIdChange['fire']({
-                    'newURL' : heroId,
-                    'updateHash' : false
-                });
-                $heroIdChange['dispose']();
-                $heroIdChange = null;
-            },
-            heroClickSubscriptions = {},
-            $heroClickedEl,
-            $heroClickedElNextSibling,
-            heroClickSub = function (e) {
-                $heroClickedEl = event['Event']['getEventTarget'](e);
-                if (!dom['hasCssClass']($heroClickedEl, HERO_CLASS)) {
-                    while (!dom['hasCssClass']($heroClickedEl, HERO_CLASS)) {
+                    if (history && typeof history.pushState === 'function') {
                         try {
-                            $heroClickedEl = $heroClickedEl.parentNode;
-                            if (!$heroClickedEl.tagName || $heroClickedEl.tagName.toLowerCase() === "body") {
-                                $heroClickedEl = null;
-                                break;
-                            }
-                        } catch (ex) {
-                            $heroClickedEl = null;
-                            break;
+                            history.pushState(history.state, '', entryAddress(href, before.slice(1)));
+                        } catch (ignore) {
+                            // A refused entry still scrolls, with none.
                         }
                     }
+                    destinationHero = next;
+                    dom['addCssClass'](next, HERO_DESTINATION_CLASS);
                 }
-
-
-                $heroClickedElNextSibling = ($heroClickedEl.nextElementSibling || $heroClickedEl['nextSibling']);
-
-
-                if ($heroClickedElNextSibling && dom['hasCssClass']($heroClickedElNextSibling, HERO_CLASS) && $heroClickedElNextSibling.id) {
+                next.scrollIntoView();
+            },
+            interactive = function (node) {
+                var tagName;
+                if (!node || node.nodeType !== 1) {
+                    return false;
+                }
+                tagName = (node.tagName || '').toUpperCase();
+                return ((tagName === 'A' || tagName === 'AREA') &&
+                        (node.hasAttribute('href') || node.hasAttribute('xlink:href'))) ||
+                    ((tagName === 'AUDIO' || tagName === 'VIDEO') && node.hasAttribute('controls')) ||
+                    INTERACTIVE_TAG.test(tagName) ||
+                    node.hasAttribute('tabindex') || node.hasAttribute('contenteditable');
+            },
+            // Whether the click passed through an interactive element
+            // below the hero itself — that element owns the click. The
+            // composed path reaches into shadow roots; without one, the
+            // parent chain from the event target stands in.
+            insideInteractive = function (e, hero) {
+                var path = typeof e.composedPath === 'function' ? e.composedPath() : null,
+                    remaining,
+                    index = 0,
+                    node;
+                if (path && path.length) {
+                    remaining = path.length;
+                    while (remaining--) {
+                        node = path[index];
+                        index += 1;
+                        if (node === hero) {
+                            return false;
+                        }
+                        if (interactive(node)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                node = event['Event']['getEventTarget'](e);
+                while (node && node !== hero) {
+                    if (interactive(node)) {
+                        return true;
+                    }
+                    node = node.parentNode;
+                }
+                return false;
+            },
+            // The following hero as the document stands at the click:
+            // still a hero, still connected.
+            nextHero = function (element) {
+                var next = element.nextElementSibling;
+                if (!next || !dom['hasCssClass'](next, HERO_CLASS) || next.isConnected === false) {
+                    return null;
+                }
+                return next;
+            },
+            heroClickHandler = function (hero) {
+                return function (e) {
+                    var next = nextHero(hero.element);
+                    if (!next || insideInteractive(e, hero.element)) {
+                        return;
+                    }
                     e.preventDefault();
-                    dispatchHeroIdChange($heroClickedElNextSibling.id);
+                    goToHero(next);
+                };
+            },
+
+            // A plain decimal from 0 to 1, or the default — no falsy-zero,
+            // no NaN, and no floor above full opacity.
+            minOpacityAttribute = function (element) {
+                var text = element.getAttribute('data-hero-min-opacity'),
+                    value = text !== null && DECIMAL.test(text) ? $Number(text) : 0;
+                return value <= 1 ? value : 0;
+            },
+
+            /*
+             * GEOMETRY
+             */
+            // The base offset the parallax starts from: the px vertical
+            // component of a single-layer computed position, else 0.
+            backgroundBaseY = function (heroImage) {
+                var text = $String($w.getComputedStyle(heroImage).getPropertyValue('background-position') || ''),
+                    parts,
+                    match;
+                if (text.indexOf(',') !== -1) {
+                    return 0;
+                }
+                parts = text.split(' ');
+                match = PIXELS.exec(parts[1] || '');
+                return match ? $Number(match[1]) : 0;
+            },
+            // Authored margins/offsets are read once per measure, never
+            // per scroll — re-reading a computed style on every scroll
+            // event forces layout in the input path.
+            measureContentVisualOffsets = function (heroContent) {
+                var heroContentStyle;
+                if (!heroContent) {
+                    return {top : 0, bottom : 0};
+                }
+                heroContentStyle = $w.getComputedStyle(heroContent);
+                return {
+                    top : ($parseFloat(heroContentStyle.getPropertyValue('margin-top')) || 0) +
+                          ($parseFloat(heroContentStyle.getPropertyValue('top')) || 0),
+                    bottom : ($parseFloat(heroContentStyle.getPropertyValue('margin-bottom')) || 0) +
+                             ($parseFloat(heroContentStyle.getPropertyValue('bottom')) || 0)
+                };
+            },
+            // The content box's visible band is measure geometry: the
+            // element's cached top plus its authored top offsets, and
+            // the cached height less both ends. Deriving it where the
+            // rects are read leaves the frame pass consuming numbers.
+            deriveVisualBounds = function (hero) {
+                var offsets = hero.contentVisualOffsets,
+                    contentBounds = hero.contentBounds;
+                if (contentBounds && offsets) {
+                    hero.contentVisualTop = contentBounds['top'] + offsets.top;
+                    hero.contentVisualHeight = contentBounds['height'] - offsets.top - offsets.bottom;
+                }
+            },
+            // Geometry recalibration batches writes before reads: the
+            // full-height overrides land for every hero first, then one
+            // pass takes every measurement — interleaving the two per
+            // hero would pay a reflow per hero. The height is read by
+            // the caller; this is writes only.
+            // The viewport width and screen orientation, as one key.
+            viewportShape = function () {
+                var screen = $w['screen'],
+                    orientation = screen ? screen['orientation'] : null,
+                    angle = $w['orientation'];
+                return dom['getViewportWidth']() + ' ' +
+                    (orientation && typeof orientation['type'] === 'string' ? orientation['type'] :
+                            (typeof angle === 'number' ? angle : ''));
+            },
+            applyHeroImageHeights = function (heroes, viewportHeight) {
+                var index = heroes.length,
+                    image,
+                    text = viewportHeight + 'px';
+                while (index--) {
+                    image = heroes[index].image;
+                    if (image && image.hasAttribute(OVERRIDE_IMAGE_HEIGHT_FLAG)) {
+                        image.style.height = text;
+                    }
+                }
+                writtenHeight = viewportHeight;
+            },
+            measureHeroes = function (heroes) {
+                var index = heroes.length,
+                    hero,
+                    image;
+                while (index--) {
+                    hero = heroes[index];
+                    image = hero.image;
+                    hero.bounds = boundsFromElement(hero.element);
+                    // The base is read once, before the first parallax
+                    // write: afterwards the computed position is the
+                    // module's own write, never the authored base.
+                    if (image && hero.backgroundY === undefined) {
+                        hero.backgroundY = backgroundSizeSupported ? backgroundBaseY(image) : 0;
+                    }
+                    hero.contentBounds = boundsFromElement(hero.content);
+                    hero.contentVisualOffsets = measureContentVisualOffsets(hero.content);
+                    deriveVisualBounds(hero);
                 }
             },
 
-
-
-
-        /*
-         * HERO MODULE LAZY LOAD
-         */
-            _heroes = null,
-            $heroElements,
-            $heroImage,
-            $heroContent,
-            $heroClickSub,
-            $heroImageUrl,
-            $heroImageBgPosition,
-            setHeroImageHeight = function (heroImage, height, heroImageBounds) {
-                var backgroundPosition;
-                if (height instanceof dom['Bounds']) {
-                    heroImageBounds = height;
-                    height = null;
-                }
-                if (heroImage) {
-                    if (heroImage.hasAttribute(OVERRIDE_IMAGE_HEIGHT_FLAG)) {
-                        height = height || dom['getViewportHeight']() + 'px';
-                        heroImage.style.height = height;
+            // Discovery only: records and classes, no geometry — the
+            // caller batches the height writes and the measurements.
+            discoverHeroes = function () {
+                var elements = dom['get']('.' + HERO_CLASS, true) || [],
+                    remaining = elements.length,
+                    index = 0,
+                    element,
+                    image,
+                    imageUrl,
+                    hero,
+                    heroes = [];
+                while (remaining--) {
+                    element = elements[index];
+                    if (touchSupported) {
+                        dom['addCssClass'](element, HERO_TOUCH_CLASS);
                     }
-
-
-                    if (heroImageBounds) {
-                        backgroundPosition = heroImageBounds.backgroundPosition;
+                    image = dom['querySelector']('.' + HERO_IMAGE_CLASS, element);
+                    if (image && !backgroundSizeSupported) {
+                        imageUrl = $w.getComputedStyle(image).getPropertyValue('background-image');
+                        if (util['stringStartsWith'](imageUrl, 'url(') && util['stringEndsWith'](imageUrl, ')')) {
+                            imageUrl = imageUrl.slice(4, -1).replace(/['"]/g, '');
+                            image.style.backgroundImage = 'none';
+                            image.style.filter = "progid:DXImageTransform.Microsoft.AlphaImageLoader(src='" + imageUrl + "', sizingMethod='scale');";
+                        }
                     }
-
-
-                    heroImageBounds = dom['Bounds']['fromElement'](heroImage);
-
-
-
-
-                    if (backgroundPosition) {
-                        heroImageBounds.backgroundPosition = backgroundPosition;
-                    }
-
-
-                    heroImage = height = null;
-                }
-
-
-                return heroImageBounds;
-            },
-            augmentHeroImageBounds = function (heroImage, heroImageBounds) {
-                if (backgroundSizeSupported && heroImage && heroImageBounds && !heroImageBounds.hasOwnProperty('backgroundPosition')) {
-                    $heroImageBgPosition = window.getComputedStyle(heroImage).getPropertyValue('background-position').split(' ');
-                    heroImageBounds.backgroundPosition = {
-                        // this isn't optimal, but oh well
-                        x : $heroImageBgPosition[0] || '50%',
-                        y : dom['getPixelValue'](heroImage, ($heroImageBgPosition[1] || 0))
+                    hero = {
+                        element : element,
+                        bounds : null,
+                        image : image,
+                        ownedStyles : {content : {}, image : {}},
+                        imageFixed : !!(image && image.hasAttribute('data-hero-image-fixed')),
+                        imageFade : !!(image && image.hasAttribute('data-hero-image-fade')),
+                        imageMinOpacity : image ? minOpacityAttribute(image) : 0,
+                        backgroundY : undefined,
+                        content : dom['querySelector']('.' + HERO_CONTENT_CLASS, element),
+                        contentBounds : null,
+                        contentVisualOffsets : null,
+                        contentVisualTop : 0,
+                        contentVisualHeight : 0,
+                        writtenContentOpacity : undefined,
+                        writtenImageOpacity : undefined,
+                        writtenBackgroundTop : undefined
                     };
-
-
-                    heroImage = null;
+                    if (!touchSupported && element.hasAttribute('data-hero-hashclick')) {
+                        pageSubscriptions.push(new Subscription('click', element, heroClickHandler(hero)));
+                    }
+                    heroes[index] = hero;
+                    index += 1;
                 }
-
-
-                return heroImageBounds;
+                return heroes;
             },
-            getHeroes = function () {
-                if (_heroes === null) {
 
+            /*
+             * OWNED STYLES
+             */
+            // A preference read that throws counts as reduced.
+            readMotion = function () {
+                try {
+                    return motion !== null && !mediaquery['motionReduced'](motion);
+                } catch (unreadable) {
+                    return false;
+                }
+            },
+            // A property the module never wrote is not its to restore:
+            // the first owned write captures the inline value and
+            // priority it replaced, and restore writes back exactly
+            // those captured records. Every write goes through
+            // setProperty with no priority, in a canonical text the
+            // style interface serializes unchanged — the record keeps
+            // that text as the ownership proof, with no readback.
+            writeOwnedStyle = function (element, owned, property, text) {
+                var style = element['style'],
+                    record = owned[property];
+                if (record === undefined) {
+                    record = owned[property] = {
+                        value : style['getPropertyValue'](property),
+                        priority : style['getPropertyPriority'](property),
+                        written : undefined
+                    };
+                }
+                style['setProperty'](property, text, '');
+                record.written = text;
+            },
+            // The captured baseline returns only while the declaration
+            // is still the one the module wrote — a newer writer's value
+            // and priority are never overwritten. The record leaves
+            // either way: a later effect pass recaptures whatever
+            // baseline is current then.
+            releaseOwnedStyle = function (element, owned, property) {
+                var record = owned[property],
+                    style = element['style'];
+                if (record === undefined) {
+                    return;
+                }
+                delete owned[property];
+                if (style['getPropertyValue'](property) === record.written &&
+                        style['getPropertyPriority'](property) === '') {
+                    style['setProperty'](property, record.value, record.priority);
+                }
+            },
+            restoreOwnedStyles = function (element, owned) {
+                var properties,
+                    propertiesLength;
+                if (!element || !owned) {
+                    return;
+                }
+                properties = $keys(owned);
+                propertiesLength = properties.length;
+                while (propertiesLength--) {
+                    releaseOwnedStyle(element, owned, properties[propertiesLength]);
+                }
+            },
+            restoreHeroPresentation = function () {
+                var heroes = heroList || [],
+                    index = heroes.length,
+                    hero;
+                while (index--) {
+                    hero = heroes[index];
+                    restoreOwnedStyles(hero.content, hero.ownedStyles.content);
+                    restoreOwnedStyles(hero.image, hero.ownedStyles.image);
+                    // The written-value memory is presentation state as
+                    // well — a motion pass after a restore must prove its
+                    // effect values again.
+                    hero.writtenContentOpacity = undefined;
+                    hero.writtenImageOpacity = undefined;
+                    hero.writtenBackgroundTop = undefined;
+                }
+            },
+            // Opacity is written to three decimal places: the canonical
+            // text compares equal to its own serialization.
+            canonicalOpacity = function (value) {
+                return $round(value * 1000) / 1000;
+            },
+            writeOpacity = function (element, owned, value) {
+                writeOwnedStyle(element, owned, opacityProperty, opacitySupported
+                    ? $String(value)
+                    : 'alpha(opacity=' + $round(value * 100) + ')');
+            },
 
-                    $heroElements = dom['get']('.' + HERO_CLASS, true) || [];
-                    _heroes = [];
-                    util['each']($heroElements, function (element, i) {
-                        if (!element.id) {
-                            element.id = guid['Guid']['create']();
-                        }
-
-
+            /*
+             * FRAME
+             */
+            // One owned frame carries all pending work: input only arms
+            // it, so high-frequency input cannot queue a write per event.
+            // It is one phased request. The read phase takes every
+            // measurement the frame needs before any module writes:
+            // the full-height target, the hero bounds when geometry
+            // moved, and the scroll position the motion pass consumes.
+            // A full-height override that changes lands in the write
+            // phase, so the bounds it moves are measured in the next
+            // frame's read phase rather than read back after the write.
+            readFrame = function () {
+                var height,
+                    shape,
+                    changedShape;
+                framePending = false;
+                passHeight = undefined;
+                if (geometryDirty) {
+                    geometryDirty = false;
+                    // Measurements feed only the motion pass, which a
+                    // touch device never runs.
+                    measurePending = !touchSupported;
+                    if (fullHeight) {
+                        height = dom['getViewportHeight']();
+                        // On touch, a height-only change is the toolbar
+                        // showing or hiding, not a new viewport: only a
+                        // new width or orientation re-applies.
+                        changedShape = true;
                         if (touchSupported) {
-                            dom['addCssClass'](element, HERO_TOUCH_CLASS);
+                            shape = viewportShape();
+                            changedShape = shape !== writtenShape;
+                            writtenShape = shape;
                         }
-
-
-                        $heroImage = dom['querySelector']('.' + HERO_IMAGE_CLASS, element);
-                        if ($heroImage && !backgroundSizeSupported) {
-                            $heroImageUrl = window.getComputedStyle($heroImage).getPropertyValue('background-image');
-                            if (util['stringStartsWith']($heroImageUrl, 'url(') && util['stringEndsWith']($heroImageUrl, ')')) {
-                                $heroImageUrl = $heroImageUrl.slice(4, -1).replace(/['"]/g, '');
-                                $heroImage.style.backgroundImage = 'none';
-                                $heroImage.style.filter = "progid:DXImageTransform.Microsoft.AlphaImageLoader(src='" + $heroImageUrl + "', sizingMethod='scale');";
-                            }
+                        if (height !== writtenHeight && changedShape) {
+                            passHeight = height;
                         }
-
-
-                        $heroContent = dom['querySelector']('.' + HERO_CONTENT_CLASS, element);
-                        if (element.hasAttribute('data-hero-hashclick')) {
-                            if (heroClickSubscriptions.hasOwnProperty(element.id)) {
-                                $heroClickSub = heroClickSubscriptions[element.id];
-                            } else if (!touchSupported) {
-                                $heroClickSub = new event['Event']['Subscription']('click', element, heroClickSub);
-                                heroClickSubscriptions[element.id] = $heroClickSub;
-                            }
-                        }
-
-
-                        _heroes.push({
-                            bounds : dom['Bounds']['fromElement'](element),
-                            image : $heroImage,
-                            imageFixed : $heroImage && $heroImage.hasAttribute('data-hero-image-fixed'),
-                            imageFade : $heroImage && $heroImage.hasAttribute('data-hero-image-fade'),
-                            imageMinOpacity : $heroImage ? ($heroImage.getAttribute('data-hero-min-opacity') || 0) : 0,
-                            imageBounds : augmentHeroImageBounds($heroImage, setHeroImageHeight($heroImage)),
-                            content : $heroContent,
-                            contentBounds : dom['Bounds']['fromElement']($heroContent),
-                            id : element.id
-                        });
-                    });
-
-
-                    $heroElements = $heroImage = $heroContent = $heroClickSub = null;
+                    }
                 }
-
-
-                return _heroes;
+                if (measurePending && passHeight === undefined) {
+                    measurePending = false;
+                    measureHeroes(heroList);
+                }
+                motionOn = readMotion();
+                passMotion = motionOn;
+                if (passMotion) {
+                    passScrollTop = dom['getScrollTop']();
+                    passOffsetTop = heroList[0].bounds['top'];
+                    passViewport = dom['getViewportHeight']();
+                }
             },
+            // The write phase, after every module's reads: the
+            // full-height override, then — while motion is allowed —
+            // the motion writes from the read phase's snapshot.
+            writeFrame = function () {
+                var heroes = heroList,
+                    heroIndex,
+                    hero,
+                    scrollTop = passScrollTop,
+                    offsetTop = passOffsetTop,
+                    availableSpace = passViewport,
+                    heroTop,
+                    heroBottom,
+                    contentTop,
+                    contentBottom,
+                    contentOpacity,
+                    imageOpacity,
+                    multiplier,
+                    targetBackgroundTop;
+                if (passHeight !== undefined) {
+                    applyHeroImageHeights(heroes, passHeight);
+                    passHeight = undefined;
+                    // The moved bounds are the next frame's first read.
+                    requestHeroFrame();
+                }
+                if (!passMotion) {
+                    return;
+                }
+                passMotion = false;
 
+                // Countdown traversal — each hero's writes are
+                // independent, so reverse order is safe.
+                heroIndex = heroes.length;
+                while (heroIndex--) {
+                    hero = heroes[heroIndex];
+                    heroBottom = hero.bounds['getBottom']() - scrollTop;
+                    heroTop = hero.bounds['top'] - scrollTop;
 
-
-
-        /*
-         * HERO MODULE SCROLL HANDLING
-         */
-            PAGE_SCROLL_MULTIPLIERS = {
-                max : 0.3,
-                min : 0.3
-            },
-            pageScrollTop,
-            $pageScrollHeroBottom,
-            $pageScrollHeroTop,
-            $pageScrollHeroContentTop,
-            $pageScrollHeroContentBottom,
-            $pageScrollHeroContentOpacity,
-            $pageScrollOffsetTop,
-            $pageScrollAvailableSpace,
-            $pageScrollBgMultiplier,
-            $pageScrollImageOpacity,
-            $pageScrollContentHeroStyle,
-            $pageScrollContentHeroVisualOffsetTop,
-            $pageScrollContentHeroVisualOffsetBottom,
-            $pageScrollVisualBounds,
-            pageScrollHandler = function (e) {
-                pageScrollTop = dom['getScrollTop']();
-                $pageScrollOffsetTop = getHeroes()[0].bounds['top'];
-                $pageScrollAvailableSpace = dom['getViewportHeight']();
-
-
-                util['each'](getHeroes(), function (hero, i) {
-                    $pageScrollHeroBottom = hero.bounds['getBottom']() - pageScrollTop;
-                    $pageScrollHeroTop = (hero.bounds['top'] - pageScrollTop);
-
-
-//                    console.log(i + ': h:' + hero.bounds.height + ' | av:' + $pageScrollAvailableSpace + ' | s:' + pageScrollTop + ' | t:' + $pageScrollHeroTop + ' | b:' + $pageScrollHeroBottom);
-
-
-                    if (hero.content && hero.image) {
-                        if ($pageScrollHeroBottom > 0 && $pageScrollHeroTop < $pageScrollAvailableSpace) {
-
-
-                            $pageScrollContentHeroStyle = window.getComputedStyle(hero.content);
-                            $pageScrollContentHeroVisualOffsetTop = (parseInt($pageScrollContentHeroStyle.getPropertyValue('margin-top'), 10) || 0) + (parseInt($pageScrollContentHeroStyle.getPropertyValue('top'), 10) || 0);
-                            $pageScrollContentHeroVisualOffsetBottom = (parseInt($pageScrollContentHeroStyle.getPropertyValue('margin-bottom'), 10) || 0) + (parseInt($pageScrollContentHeroStyle.getPropertyValue('bottom'), 10) || 0);
-
-
-                            $pageScrollVisualBounds = new dom['Bounds'](
-                                hero.contentBounds.left,
-                                hero.contentBounds.top + $pageScrollContentHeroVisualOffsetTop,
-                                hero.contentBounds.width,
-                                hero.contentBounds.height - $pageScrollContentHeroVisualOffsetTop - $pageScrollContentHeroVisualOffsetBottom
-                            );
-
-
-                            $pageScrollHeroContentBottom = $pageScrollVisualBounds['getBottom']() - pageScrollTop;
-                            $pageScrollHeroContentTop = ($pageScrollVisualBounds['top'] - pageScrollTop);
-
-
-//                            console.log('- ' + i + ': offset: ' + $pageScrollContentHeroVisualOffsetTop + ' | cb: ' + $pageScrollHeroContentBottom + ' | ct: ' + $pageScrollHeroContentTop + ' | %b: ' + ($pageScrollHeroContentTop / pageScrollTop) + ' | %t: ' + ($pageScrollHeroContentTop / $pageScrollVisualBounds['height']));
-
-
-                            if ($pageScrollHeroContentTop > $pageScrollAvailableSpace) {
-                                // BELOW FOLD
-//                                console.log("BELOW FOLD");
-                                $pageScrollHeroContentOpacity = 0;
+                    // A hero the viewport cannot show keeps its last
+                    // presentation — every write below is invisible
+                    // while it is out of band.
+                    if (heroBottom > 0 && heroTop < availableSpace) {
+                        if (hero.content && hero.image) {
+                            contentTop = hero.contentVisualTop - scrollTop;
+                            contentBottom = hero.contentVisualTop + hero.contentVisualHeight - scrollTop;
+                            contentOpacity = undefined;
+                            if (contentTop > availableSpace) {
+                                // below the fold
+                                contentOpacity = 0;
+                            } else if (contentBottom <= availableSpace && contentTop >= offsetTop) {
+                                // in view
+                                contentOpacity = 1;
+                            } else if (contentTop < offsetTop && heroBottom >= offsetTop) {
+                                // leaving at the top
+                                contentOpacity = canonicalOpacity($max(0,
+                                    1 - ((offsetTop - contentTop) / hero.contentVisualHeight)));
+                            } else if (heroBottom < offsetTop) {
+                                // above the top
+                                contentOpacity = 0;
                             }
-
-
-                        /*
-                                This was causing content to be faded even when scrolled to the top. The "in view" logic
-                                below seemed to handle the fade well enough on it's own.
-
-
-                            else if ($pageScrollHeroContentTop <= $pageScrollAvailableSpace && $pageScrollHeroContentBottom >= $pageScrollAvailableSpace) {
-                                // COMING INTO VIEW FROM BOTTOM FOLD
-//                                console.log('%b: ' + (($pageScrollAvailableSpace - $pageScrollHeroContentTop) / $pageScrollVisualBounds['height']));
-                                $pageScrollHeroContentOpacity = Math.min(1, (($pageScrollAvailableSpace - $pageScrollHeroContentTop) / $pageScrollVisualBounds['height']));
+                            if (contentOpacity === undefined) {
+                                // Entering from the bottom fold no rule
+                                // claims a value: the owned fade is
+                                // released so the authored opacity
+                                // shows instead of a stale 0.
+                                if (hero.writtenContentOpacity !== undefined) {
+                                    releaseOwnedStyle(hero.content, hero.ownedStyles.content, opacityProperty);
+                                    hero.writtenContentOpacity = undefined;
+                                }
+                            } else if (contentOpacity !== hero.writtenContentOpacity) {
+                                writeOpacity(hero.content, hero.ownedStyles.content, contentOpacity);
+                                hero.writtenContentOpacity = contentOpacity;
                             }
-                        */
-                            else if ($pageScrollHeroContentBottom <= $pageScrollAvailableSpace && $pageScrollHeroContentTop >= $pageScrollOffsetTop) {
-                                // IN VIEW
-//                                console.log("IN VIEW");
-                                $pageScrollHeroContentOpacity = 1;
-                            } else if ($pageScrollHeroContentTop < $pageScrollOffsetTop && $pageScrollHeroBottom >= $pageScrollOffsetTop) {
-                                // GOING OUT OF VIEW AT THE TOP
-//                                console.log('%t: ' + (1 - (($pageScrollOffsetTop - $pageScrollHeroContentTop) / $pageScrollVisualBounds['height'])));
-                                $pageScrollHeroContentOpacity = Math.max(0, (1 - (($pageScrollOffsetTop - $pageScrollHeroContentTop) / $pageScrollVisualBounds['height'])));
-                            } else if ($pageScrollHeroBottom < $pageScrollOffsetTop) {
-                                // ABOVE TOP
-                                $pageScrollHeroContentOpacity = 0;
-//                                console.log("ABOVE TOP");
+                        }
+
+                        // The fade floors at the declared minimum: a
+                        // jump past it still lands the floor.
+                        if (hero.imageFade) {
+                            imageOpacity = canonicalOpacity($max(hero.imageMinOpacity,
+                                $min(1, $max(heroBottom / availableSpace, 0))));
+                            if (imageOpacity !== hero.writtenImageOpacity) {
+                                writeOpacity(hero.image, hero.ownedStyles.image, imageOpacity);
+                                hero.writtenImageOpacity = imageOpacity;
                             }
+                        }
 
-
-                            if (opacitySupported) {
-                                hero.content.style.opacity = $pageScrollHeroContentOpacity;
+                        if (backgroundSizeSupported && hero.image && !hero.imageFixed) {
+                            targetBackgroundTop = heroTop;
+                            if (targetBackgroundTop - offsetTop > availableSpace) {
+                                multiplier = 1;
                             } else {
-                                hero.content.style.filter = 'alpha(opacity=' + ($pageScrollHeroContentOpacity * 100) + ')';
+                                targetBackgroundTop = heroBottom - availableSpace;
+                                if (targetBackgroundTop <= 1 && targetBackgroundTop >= 0) {
+                                    targetBackgroundTop = 1;
+                                } else if (targetBackgroundTop <= 0 && targetBackgroundTop >= -1) {
+                                    targetBackgroundTop = -1;
+                                }
+                                // The multiplier's clamp has equal lower
+                                // and upper bounds, so whatever the
+                                // ratio, the clamped value is the bound.
+                                multiplier = BACKGROUND_MULTIPLIER;
                             }
-
-
-                            $pageScrollHeroContentTop = null;
-                            $pageScrollHeroContentBottom = null;
-                            $pageScrollHeroContentOpacity = null;
-                            $pageScrollContentHeroStyle = null;
-                            $pageScrollContentHeroVisualOffsetTop = null;
-                            $pageScrollContentHeroVisualOffsetBottom = null;
-                            $pageScrollVisualBounds = null;
+                            targetBackgroundTop = (targetBackgroundTop * multiplier) + hero.backgroundY;
+                            if (targetBackgroundTop > scrollTop + heroTop) {
+                                targetBackgroundTop = scrollTop + heroTop;
+                            }
+                            targetBackgroundTop = $round(targetBackgroundTop);
+                            // An unchanged offset writes nothing; the
+                            // attachment is written once, when the
+                            // parallax takes ownership.
+                            if (targetBackgroundTop !== hero.writtenBackgroundTop) {
+                                if (hero.writtenBackgroundTop === undefined) {
+                                    writeOwnedStyle(hero.image, hero.ownedStyles.image, 'background-attachment', 'fixed');
+                                }
+                                writeOwnedStyle(hero.image, hero.ownedStyles.image, 'background-position',
+                                    '50% ' + targetBackgroundTop + 'px');
+                                hero.writtenBackgroundTop = targetBackgroundTop;
+                            }
                         }
-
-
                     }
-
-
-                    if (hero.imageFade) {
-                        $pageScrollImageOpacity = Math.max(($pageScrollHeroBottom / $pageScrollAvailableSpace), 0);
-
-
-                        if (opacitySupported) {
-                            if ($pageScrollImageOpacity > hero.imageMinOpacity) {
-                                hero.image.style.opacity = $pageScrollImageOpacity;
-                            }
-                        } else {
-                            if ($pageScrollImageOpacity > (hero.imageMinOpacity * 100)) {
-                                hero.image.style.filter = 'alpha(opacity=' + ($pageScrollImageOpacity * 100) + ')';
-                            }
-                        }
-                        $pageScrollImageOpacity = null;
-                    }
-
-
-                    if (backgroundSizeSupported && hero.image && !hero.imageFixed) {
-                        var targetBackgroundTop = $pageScrollHeroTop;
-                        if (targetBackgroundTop - $pageScrollOffsetTop > $pageScrollAvailableSpace) {
-                            $pageScrollBgMultiplier = 1;
-                        } else {
-                            targetBackgroundTop = $pageScrollHeroBottom - $pageScrollAvailableSpace;
-
-
-                            if (targetBackgroundTop <= 1 && targetBackgroundTop >= 0) {
-                                targetBackgroundTop = 1;
-                            } else if (targetBackgroundTop <= 0 && targetBackgroundTop >= -1) {
-                                targetBackgroundTop = -1;
-                            }
-
-
-                            $pageScrollBgMultiplier = Math.abs(targetBackgroundTop / $pageScrollAvailableSpace);
-                            if ($pageScrollBgMultiplier >= PAGE_SCROLL_MULTIPLIERS.max) {
-                                $pageScrollBgMultiplier = PAGE_SCROLL_MULTIPLIERS.max;
-                            } else if ($pageScrollBgMultiplier <= PAGE_SCROLL_MULTIPLIERS.min) {
-                                $pageScrollBgMultiplier = PAGE_SCROLL_MULTIPLIERS.min;
-                            }
-                        }
-                        targetBackgroundTop = (targetBackgroundTop * $pageScrollBgMultiplier) + parseInt(hero.imageBounds.backgroundPosition.y, 10);
-                        if (targetBackgroundTop > pageScrollTop + $pageScrollHeroTop) {
-                            targetBackgroundTop -= (targetBackgroundTop - (pageScrollTop + $pageScrollHeroTop));
-                        }
-                        hero.image.style.backgroundAttachment = 'fixed';
-                        hero.image.style.backgroundPosition = '50% ' + (targetBackgroundTop) + 'px';
-
-
-                        $pageScrollBgMultiplier = null;
-                    }
-                });
-
-
-                $pageScrollHeroBottom = null;
-                $pageScrollHeroTop = null;
-                $pageScrollOffsetTop = null;
-                $pageScrollAvailableSpace = null;
-            },
-            pageScrollSub = new event['Event']['Subscription']('scroll', window, pageScrollHandler),
-            $dispatchPageScrollTimeout,
-            dispatchPageScroll = function () {
-                window.clearTimeout($dispatchPageScrollTimeout);
-                if (pageScrollSub['isBound']()) {
-                    $dispatchPageScrollTimeout = window.setTimeout(pageScrollHandler, 0);
                 }
             },
-
-
-
-
-        /*
-         * HERO MODULE RESIZE HANDLING
-         */
             pageResizeHandler = function () {
-                util['each'](getHeroes(), function (hero, i) {
-                    hero.bounds = dom['Bounds']['fromElement'](dom['get'](hero.id));
-                    hero.imageBounds = augmentHeroImageBounds(hero.image, setHeroImageHeight(hero.image, hero.imageBounds));
-                    hero.contentBounds = dom['Bounds']['fromElement'](hero.content);
-                });
-
-
-                dispatchPageScroll();
+                geometryDirty = true;
+                requestHeroFrame();
             },
-            pageResizeSub = new event['Event']['Subscription']('resize', window, pageResizeHandler),
-            $dispatchPageResizeTimeout,
-            dispatchPageResize = function () {
-                window.clearTimeout($dispatchPageResizeTimeout);
-                if (pageResizeSub['isBound']()) {
-                    $dispatchPageResizeTimeout = window.setTimeout(pageResizeHandler, 0);
+            onReducedMotionChange = function () {
+                motionOn = readMotion();
+                if (motionOn) {
+                    requestHeroFrame();
+                } else {
+                    // The motion effects are this module's writes —
+                    // when the preference lands, what the stylesheet
+                    // authored must be what remains.
+                    restoreHeroPresentation();
                 }
             },
+            anyFullHeight = function (heroes) {
+                var index = heroes.length,
+                    image;
+                while (index--) {
+                    image = heroes[index].image;
+                    if (image && image.hasAttribute(OVERRIDE_IMAGE_HEIGHT_FLAG)) {
+                        return true;
+                    }
+                }
+                return false;
+            },
 
+            init = function () {
+                // The loaded marker is the page's, not the feature's:
+                // pages gate presentation on it with or without heroes.
+                html.classList.add(LOADED_CLASS);
+                body.classList.add(LOADED_CLASS);
 
+                heroList = discoverHeroes();
 
+                // No hero markup means no feature: nothing subscribes
+                // and nothing measures.
+                if (!heroList.length) {
+                    return;
+                }
 
-        /*
-         * INITIALIZATION
-         */
-            init = (function () {
-                var hash = window.location.hash.split('#', 2)[1];
-
+                fullHeight = anyFullHeight(heroList);
+                if (fullHeight) {
+                    applyHeroImageHeights(heroList, dom['getViewportHeight']());
+                    if (touchSupported) {
+                        writtenShape = viewportShape();
+                    }
+                }
 
                 if (touchSupported) {
-                    pageScrollSub['detach']();
-                    pageResizeSub['detach']();
-                } else {
-                    dispatchPageScroll();
+                    // Touch devices run no motion; the full-height
+                    // geometry still follows a new viewport width or
+                    // orientation.
+                    if (fullHeight) {
+                        pageSubscriptions.push(new Subscription('resize', $w, pageResizeHandler));
+                    }
+                    return;
                 }
 
+                measureHeroes(heroList);
+                pageSubscriptions.push(new Subscription('scroll', $w, requestHeroFrame));
+                pageSubscriptions.push(new Subscription('resize', $w, pageResizeHandler));
+                // Late layout re-measures as a resize does: the body
+                // changing size, and the document's load (one-shot — the
+                // subscription retires with it).
+                if ($d.readyState !== 'complete') {
+                    pageSubscriptions.push(new Subscription('load', $w, pageResizeHandler, null, 1));
+                }
+                if (typeof NativeResizeObserver === 'function') {
+                    try {
+                        bodyObserver = new NativeResizeObserver(pageResizeHandler);
+                        bodyObserver.observe(body);
+                    } catch (refused) {
+                        // The resize and load inputs remain.
+                        bodyObserver = null;
+                    }
+                }
+                // The motion probe runs only once markup proved the
+                // feature exists; the shared utility owns the
+                // MediaQueryList binding and its unobservable policy.
+                motion = mediaquery['observe']('(prefers-reduced-motion: reduce)', onReducedMotionChange);
+                motionOn = readMotion();
+                // The first motion pass; under reduced motion — or an
+                // unobservable preference — nothing is armed.
+                requestHeroFrame();
+            };
 
-                getHeroes();
+        // A frame is armed only when it has work: dirty geometry,
+        // bounds waiting on a read phase, or motion the kept preference
+        // allows. The pending mark is set before the request so the
+        // frame is armed once however many events arrive before it.
+        requestHeroFrame = function () {
+            if (framePending || !(geometryDirty || measurePending || motionOn)) {
+                return;
+            }
+            framePending = true;
+            requestPhased(readFrame, writeFrame);
+        };
 
-
-                html.classList.add('paste-ui-heroscroll-loaded');
-                body.classList.add('paste-ui-heroscroll-loaded');
-            }());
+        init();
+        return heroscroll;
     }
 );
-/*endregion*/

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>imagesequence — two compositions</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 0; }
+.lead { margin: 2rem; max-width: 40rem; line-height: 1.5; }
+.scroll-band { min-height: 260vh; position: relative; }
+.hero-sticky { position: sticky; top: 0; height: 100vh; }
+/* The frames fill the host at any size: an intrinsic-size fit (the
+   background-size default, auto) would paint a sharper upgrade larger
+   rather than sharper, so the host declares cover. */
+.paste-ui-imagesequence {
+    display: block; height: 100%; width: 100%;
+    background-size: cover; background-position: center; background-repeat: no-repeat;
+}
+.caption { position: absolute; left: 2rem; bottom: 2rem; color: #fff; z-index: 2; }
+/* The skip sits inside the sticky's top band so it is reachable without
+   scrolling — any scroll while the intro waits already hands the scene to
+   scroll ownership and retires the control. */
+.skip { position: absolute; right: 1rem; top: 1rem; z-index: 2; }
+.progress {
+    background: rgba(255,255,255,.25); height: 3px; left: 2rem;
+    position: absolute; right: 2rem; top: 1.5rem; z-index: 2;
+}
+.progress > i {
+    background: #c78a1e; display: block; height: 100%;
+    transform-origin: 0 50%;
+    transform: scaleX(var(--paste-scrub-progress, 0));
+}
+/* The authored baselines — the frames' first pose for a scripting page,
+   the assembled final pose for reduced motion. */
+#press-host { background-image: url("/generated/sequence/catalog-press/t0/frame-0.png"); }
+#hall-host { background-image: url("/generated/sequence/gallery-hall/t0/frame-0.png"); }
+@media (prefers-reduced-motion: reduce) {
+    #press-host { background-image: url("/generated/sequence/catalog-press/t0/frame-11.png"); }
+    #hall-host { background-image: url("/generated/sequence/gallery-hall/t0/frame-15.png"); }
+}
+</style>
+</head>
+<body>
+<div class="lead">
+<h1>Two declared sequence compositions</h1>
+<p>The catalog press plays a finite intro once its first frame is ready,
+then hands the playhead to scroll — the declared range runs the catalog
+backwards from frame 11 to frame 3 across the middle of the section's
+traverse. The gallery hall scrubs its whole catalog through a window.
+Each scene is one element: scope, host, inert catalog. The thin bar is
+scrollscrub's own property driving CSS; the frames are the sequence's
+independent measure of the same declaration.</p>
+</div>
+
+<section id="press-section" class="scroll-band">
+<div id="press-hero"
+     class="hero-sticky"
+     data-paste-scrollscrub
+     data-scrub-subject="#press-section"
+     data-scrub-start="top top"
+     data-scrub-end="bottom top"
+     data-scrub-window="0.15 0.85">
+    <i id="press-host" class="paste-ui-imagesequence"
+       data-paste-imagesequence="#press-catalog"
+       data-paste-progressiveresolution
+       data-sequence-from="11"
+       data-sequence-to="3"
+       data-sequence-intro-to="11"
+       data-sequence-intro-duration-ms="1400"
+       data-sequence-intro-easing="ease-in-out"
+       data-sequence-intro-skip="#press-skip"></i>
+    <script id="press-catalog" type="application/json">{"frames":[
+        {"src":"/generated/sequence/catalog-press/t0/frame-0.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-0.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-1.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-1.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-2.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-2.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-3.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-3.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-4.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-4.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-5.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-5.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-6.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-6.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-7.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-7.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-8.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-8.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-9.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-9.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-10.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-10.png","width":640,"height":480}]},
+        {"src":"/generated/sequence/catalog-press/t0/frame-11.png","width":320,"height":240,"upgrades":[{"src":"/generated/sequence/catalog-press/t1/frame-11.png","width":640,"height":480}]}
+    ]}</script>
+    <div class="progress"><i></i></div>
+    <div class="caption"><h2>Catalog press</h2><p>intro, then scroll</p></div>
+    <button type="button" id="press-skip" class="skip" hidden>Skip intro</button>
+</div>
+</section>
+
+<div class="lead"><p>Between the scenes each module measures independently —
+the sequence and the property never talk to each other.</p></div>
+
+<section id="hall-section" class="scroll-band">
+<div id="hall-hero"
+     class="hero-sticky"
+     data-paste-scrollscrub
+     data-scrub-subject="#hall-section"
+     data-scrub-window="0.30 0.70">
+    <i id="hall-host" class="paste-ui-imagesequence"
+       data-paste-imagesequence="#hall-catalog"
+       data-paste-progressiveresolution></i>
+    <script id="hall-catalog" type="application/json">{"frames":[
+        {"src":"/generated/sequence/gallery-hall/t0/frame-0.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-0.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-1.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-1.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-2.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-2.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-3.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-3.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-4.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-4.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-5.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-5.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-6.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-6.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-7.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-7.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-8.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-8.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-9.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-9.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-10.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-10.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-11.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-11.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-12.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-12.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-13.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-13.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-14.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-14.png","width":640,"height":360}]},
+        {"src":"/generated/sequence/gallery-hall/t0/frame-15.png","width":320,"height":180,"upgrades":[{"src":"/generated/sequence/gallery-hall/t1/frame-15.png","width":640,"height":360}]}
+    ]}</script>
+    <div class="progress"><i></i></div>
+    <div class="caption"><h2>Gallery hall</h2><p>windowed traverse</p></div>
+</div>
+</section>
+
+<div class="lead"><p>End of scroll range.</p></div>
+
+<script src="/js/paste/paste.js"></script>
+<script src="/js/paste/guid.js"></script>
+<script src="/js/paste/util.js"></script>
+<script src="/js/paste/event.js"></script>
+<script src="/js/paste/ui/utilities/animation-frame.js"></script>
+<script src="/js/paste/ui/utilities/scrollrange.js"></script>
+<script src="/js/paste/ui/utilities/imageresolution.js"></script>
+<script src="/js/paste/ui/utilities/mediaquery.js"></script>
+<script src="/js/paste/ui/scrollscrub.js"></script>
+<script src="/js/paste/ui/imagesequence.js"></script>
+<script src="/js/paste/ui/progressiveresolution.js"></script>
+</body>
+</html>

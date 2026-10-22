@@ -31,8 +31,58 @@ License 2.0.
 
 ## Third-Party Notices
 
-At this time, this project does not bundle third-party source code requiring
-additional attribution.
+The package the CI pipeline publishes from this repository contains Tomshley
+LLC source (`base/`, `modules/`, `structure/`), the project documents, and one
+third-party file in `base/`, listed below. Source archives built from a tagged
+revision (`git archive`, and the archive downloads GitHub and GitLab serve,
+which the WebJar release consumes) leave out `tests/` and `examples/`: both are
+marked `export-ignore` in `.gitattributes`.
 
-If third-party components are added in the future, required attributions will be
-documented here.
+### Eric Meyer's CSS reset (shipped in the package)
+
+`base/_reset.scss` is adapted from Eric Meyer's "Reset CSS" v2.0 (2011-01-26,
+http://meyerweb.com/eric/tools/css/reset/), which its author released into the
+public domain ("License: none (public domain)", as the file header records).
+The file carries the reset's rules without its `body { line-height: 1; }` rule.
+It is part of the published package and of source archives, and `base/_base.scss`
+imports it. Public-domain material carries no license terms; this entry records
+its origin.
+
+### JSLint (development-only test dependency)
+
+`tests/vendor/jslint-2014-04-21.cjs` is Douglas Crockford's JSLint, edition
+2014-04-21, as published in the npm package `jslint@0.8.1` (file
+`lib/jslint-2014-04-21.js`), carried with a `.cjs` name. It is used only by this
+repository's own test suites to lint the module sources. It is never served to a
+page, is not in the package the CI pipeline publishes, is left out of source
+archives by the `export-ignore` attribute on `tests/`, and is not licensed under
+the Apache License 2.0. Its license, reproduced exactly from the file header:
+
+```
+Copyright (c) 2002 Douglas Crockford  (www.JSLint.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+The Software shall be used for Good, not Evil.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+Note the additional "Good, not Evil" condition, which differs from the MIT
+License. The file stays a development-only test file: it is present in a clone of
+the repository, and it is excluded from the CI package and, through
+`export-ignore`, from source archives.

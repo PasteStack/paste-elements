@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>paste-elements examples</title>
+<style>body { font-family: system-ui, sans-serif; margin: 2rem; } li { margin: .5rem 0; }</style>
+</head>
+<body>
+<h1>paste-elements examples</h1>
+<ul>
+<li><a href="/examples/reading.html">reading</a> — scrollscrub publishes progress, CSS owns the bar</li>
+<li><a href="/examples/sequence-hero.html">sequence-hero</a> — imagesequence + scrollscrub + resolution: intro then reversed scroll range, and a windowed traverse</li>
+<li><a href="/examples/avatars.html">avatars</a> — progressiveresolution on standalone images with a declared CSS cap</li>
+<li><a href="/examples/heroscroll.html">heroscroll</a> — parallax background position and image fade on a hero</li>
+<li><a href="/examples/stickynav.html">stickynav</a> — a sub-navigation stuck through the paste-fixed-subnav body class</li>
+</ul>
+<p>Each page is a plain document: the authored markup already contains
+what it needs to be readable, and every script above is an independent
+declaration. Serve with <code>PASTE_CORE_JS=/path/to/paste/src/js node tests/serve-examples.cjs</code>
+and open <code>http://127.0.0.1:8087/examples/</code>.</p>
+</body>
+</html>
