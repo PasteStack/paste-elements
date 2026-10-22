@@ -36,10 +36,31 @@ test:
   image: node:22.14.0-bookworm
   stage: test
   needs: [package-source]
+  variables:
+    # The paste core revision the suite and the fixture host run against.
+    # It is pinned so a branch or tag pipeline always tests the same core
+    # bytes; bump it deliberately, in its own change, after the suite
+    # passes against the new core revision.
+    PASTE_CORE_SHA: "1887086de7d0aa37714a7a0f2ac6e1508cc3aefd"
   script:
     # Every shipped module must parse; naming individual modules let new ones
-    # ship unchecked.
+    # ship unchecked. The suite helpers the tests load parse the same way.
     - find modules -name '*.js' -print0 | xargs -0 -n1 node --check
+    - find tests -name '*.cjs' -print0 | xargs -0 -n1 node --check
+    # The core-dependent suites (the fake/real event parity check and the
+    # fixture host check) fail without PASTE_CORE_JS, so the dependency is
+    # established here, not assumed. Exactly the pinned commit is fetched,
+    # never a moving branch. The core project is public, so the fetch is
+    # anonymous: no job token or other credential is sent with it. The
+    # clone lands inside the checkout's ignored target/ directory — a path
+    # outside the project would depend on the runner's workspace layout.
+    - git init --quiet "$CI_PROJECT_DIR/target/paste"
+    - git -C "$CI_PROJECT_DIR/target/paste" remote add origin "https://gitlab.com/tomshley/brands/global/tware/tech/products/paste/paste.git"
+    - git -C "$CI_PROJECT_DIR/target/paste" fetch --quiet --depth 1 origin "$PASTE_CORE_SHA"
+    - git -C "$CI_PROJECT_DIR/target/paste" checkout --quiet --detach FETCH_HEAD
+    - echo "paste core under test at $(git -C "$CI_PROJECT_DIR/target/paste" rev-parse HEAD)"
+    - test "$(git -C "$CI_PROJECT_DIR/target/paste" rev-parse HEAD)" = "$PASTE_CORE_SHA"
+    - export PASTE_CORE_JS="$CI_PROJECT_DIR/target/paste/src/js"
     # The Element behaviour checks are the repository's own suite (Node's test
     # runner, no dependencies). Running them here is what keeps them honest.
     - node --test 'tests/*.test.cjs'

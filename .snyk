@@ -1,0 +1,40 @@
+# Snyk policy file
+#
+# Snyk Code findings cannot be ignored per issue from this file — the
+# policy's per-issue `ignore` entries apply to dependency issues only.
+# The narrowest form available here is a per-file exclusion, so each entry
+# below names one test-only file, records which Snyk Code rules it was
+# reviewed against, and expires so the exclusion is re-reviewed rather than
+# kept forever. None of these files ships in a package.
+version: v1.25.1
+exclude:
+  code:
+    # Loopback-only fixture host for the example pages (rules reviewed:
+    # HttpToHttps, NoRateLimitingForExpensiveWebOperation, PT, XSS). It binds
+    # 127.0.0.1, answers only loopback Host headers, and serves a file only
+    # when the request path matches an entry in the index it built at
+    # startup; responses are fixture bytes, never request echoes.
+    - tests/serve-examples.cjs:
+        reason: Test-only loopback fixture host; plain HTTP to loopback and index-confined file reads are the intended flow.
+        created: 2026-10-20T00:00:00.000Z
+        expires: 2027-04-20T00:00:00.000Z
+    # The fixture's verifier (rules reviewed: HttpToHttps, PT). The URL is
+    # refused unless its host is loopback, and the evidence record path is
+    # confined to the physical working tree before any write.
+    - tests/verify-fixture-identity.cjs:
+        reason: Test-only verifier; loopback-enforced URL and a record path confined to the working tree.
+        created: 2026-10-20T00:00:00.000Z
+        expires: 2027-04-20T00:00:00.000Z
+    # The browser checks (rule reviewed: Ssrf). The fixture URL argument is
+    # rejected unless it is loopback before any request is sent.
+    - tests/ElementsBrowserChecks.java:
+        reason: Test-only browser check; the fixture URL is loopback-enforced before any request.
+        created: 2026-10-20T00:00:00.000Z
+        expires: 2027-04-20T00:00:00.000Z
+    # The fixture's own test (rule reviewed: HttpToHttps) requests only the
+    # literal 127.0.0.1 host it spawned.
+    - tests/serve-examples.test.cjs:
+        reason: Test-only; requests go to the literal loopback host the test spawned.
+        created: 2026-10-20T00:00:00.000Z
+        expires: 2027-04-20T00:00:00.000Z
+patch: {}

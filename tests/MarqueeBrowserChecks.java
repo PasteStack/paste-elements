@@ -2,12 +2,14 @@ import com.google.gson.GsonBuilder;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.ReducedMotion;
 import com.microsoft.playwright.options.WaitUntilState;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /** Real browser acceptance checks. See run-marquee-browser-checks.sh for the offline runner. */
 public final class MarqueeBrowserChecks {
@@ -212,7 +214,6 @@ public final class MarqueeBrowserChecks {
             page.evaluate("""
                 () => new Promise(resolve => paste.require(['paste.ui.marquee'], (module, marquee) => {
                   marqueeChecks.module = marquee;
-                  marqueeChecks.controls = marqueeChecks.roots.map(root => marquee.init(root));
                   resolve();
                 }))
                 """);
@@ -221,6 +222,12 @@ public final class MarqueeBrowserChecks {
 
     private static void scenario(Browser browser, String engine, String name, int width,
                                  boolean javascript, boolean unsupported, boolean reduced, Check check) {
+        scenario(browser, engine, name, width, javascript, unsupported, reduced, null, check);
+    }
+
+    private static void scenario(Browser browser, String engine, String name, int width,
+                                 boolean javascript, boolean unsupported, boolean reduced,
+                                 Consumer<Page> preSetup, Check check) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("browser", engine);
         result.put("browserVersion", browser.version());
@@ -241,6 +248,10 @@ public final class MarqueeBrowserChecks {
             Page page = context.newPage();
             page.setDefaultTimeout(6000);
             page.onPageError(errors::add);
+            // Fixture mutation a scenario needs before module evaluation —
+            // authored attributes are inputs the module reads once at bind,
+            // so the hook installs them ahead of navigation.
+            if (preSetup != null) preSetup.accept(page);
             Response response = page.navigate(url, new Page.NavigateOptions().setWaitUntil(WaitUntilState.LOAD));
             require(response != null && response.ok(), "fixture must load successfully");
             setup(page, javascript);
@@ -284,8 +295,16 @@ public final class MarqueeBrowserChecks {
     }
 
     private static void runBrowser(Playwright playwright, String engine) {
-        BrowserType type = engine.equals("chromium") ? playwright.chromium() : playwright.webkit();
+        BrowserType type = switch (engine) {
+            case "chromium" -> playwright.chromium();
+            case "firefox" -> playwright.firefox();
+            case "webkit" -> playwright.webkit();
+            default -> throw new IllegalArgumentException("Unknown browser engine: " + engine);
+        };
         BrowserType.LaunchOptions launch = new BrowserType.LaunchOptions().setHeadless(true);
+        // Include links in native tab navigation independently of the host's
+        // macOS keyboard preference, as the keyboard scenario requires.
+        if (engine.equals("firefox")) launch.setFirefoxUserPrefs(Map.of("accessibility.tabfocus", 7));
         String executable = System.getenv("MARQUEE_CHROMIUM_EXECUTABLE");
         if (engine.equals("chromium") && executable != null && !executable.isBlank()) {
             launch.setExecutablePath(Path.of(executable));
@@ -298,7 +317,7 @@ public final class MarqueeBrowserChecks {
                     evidence.put("rootBounds", page.evaluate("() => marqueeChecks.bounded()"));
                     evidence.put("short", page.evaluate("() => marqueeChecks.flow(1)"));
                     evidence.put("interactive", page.evaluate("() => marqueeChecks.flow(2)"));
-                    page.evaluate("() => marqueeChecks.controls.forEach((control, i) => marqueeChecks.assert(control === marqueeChecks.module.init(marqueeChecks.roots[i]), 'idempotent initialization'))");
+                    page.evaluate("() => marqueeChecks.assert(Object.keys(marqueeChecks.module).length === 0, 'declarative module exposes no imperative surface', Object.keys(marqueeChecks.module))");
                     nativeMotion(page, evidence, "nativeMotion", 180);
                     evidence.put("wraps", page.evaluate("() => marqueeChecks.wraps()"));
                     page.locator("[data-paste-marquee]").nth(2).locator("a").first().focus();
@@ -378,126 +397,228 @@ public final class MarqueeBrowserChecks {
                 page.evaluate("""
                     () => {
                       const h = marqueeChecks, item = document.createElement('li');
+                      h.preAppendDistance = h.initial[0].list.style.getPropertyValue('--paste-marquee-distance');
                       item.className = 'paste-ui-marquee-item'; item.textContent = 'New original';
                       item.style.setProperty('--paste-marquee-delay', '7s', h.important ? 'important' : '');
                       h.appended = item; h.initial[0].list.append(item); h.expected[0].push(item);
-                      h.controls[0].refresh(); h.identities();
+                      h.identities();
                     }
                     """);
+                // The module observes list content declaratively — no imperative refresh exists.
+                page.waitForFunction("() => parseFloat(marqueeChecks.appended.style.getPropertyValue('--paste-marquee-delay')) < 0");
                 state(page, 0, "running");
                 evidence.put("appended", page.evaluate("() => ({geometry: marqueeChecks.geometry(), inline: marqueeChecks.appended.style.cssText, computedDelay: getComputedStyle(marqueeChecks.appended).animationDelay, delay: marqueeChecks.appended.getAnimations()[0].effect.getTiming().delay})"));
                 evidence.put("appendedWraps", page.evaluate("() => marqueeChecks.wraps()"));
                 page.evaluate("""
                     () => {
                       const h = marqueeChecks;
-                      h.appended.remove(); h.expected[0].pop(); h.controls[0].refresh(); h.identities();
-                      h.assert(h.appended.style.getPropertyValue('--paste-marquee-delay') === '7s' &&
-                        h.appended.style.getPropertyPriority('--paste-marquee-delay') === (h.important ? 'important' : ''), 'removed item owned delay restored');
-                      h.removed = h.expected[0].splice(1); h.removed.forEach(item => item.remove()); h.controls[0].refresh();
+                      h.appended.remove(); h.expected[0].pop(); h.identities();
+                    }
+                    """);
+                // Removal is re-measured through the same list-local
+                // observation: the distance returns to its authored
+                // count. A detached node is released back to the
+                // caller's authored markup — the module surrenders the
+                // delay it owns and writes back the authored value and
+                // priority it replaced, rather than leaving its own
+                // state (or nothing) on a node it no longer observes.
+                page.waitForFunction("() => marqueeChecks.initial[0].list.style.getPropertyValue('--paste-marquee-distance') === marqueeChecks.preAppendDistance");
+                page.waitForFunction("() => marqueeChecks.appended.style.getPropertyValue('--paste-marquee-delay') === '7s'");
+                page.evaluate("""
+                    () => {
+                      const style = marqueeChecks.appended.style;
+                      marqueeChecks.assert(style.getPropertyValue('--paste-marquee-delay') === '7s',
+                        'a detached item did not get its authored delay back', style.cssText);
+                      marqueeChecks.assert(style.getPropertyPriority('--paste-marquee-delay') === (marqueeChecks.important ? 'important' : ''),
+                        'a detached item got its authored delay back with the wrong priority', style.cssText);
+                    }
+                    """);
+                page.evaluate("""
+                    () => {
+                      const h = marqueeChecks;
+                      h.removed = h.expected[0].splice(1); h.removed.forEach(item => item.remove());
                     }
                     """);
                 state(page, 0, "static"); identities(page); page.evaluate("() => marqueeChecks.flow(0)");
                 page.evaluate("""
                     () => { const h = marqueeChecks; h.removed.forEach(item => h.initial[0].list.append(item));
-                      h.expected[0].push(...h.removed); h.controls[0].refresh(); h.identities(); }
+                      h.expected[0].push(...h.removed); h.identities(); }
                     """);
                 state(page, 0, "running");
                 evidence.put("restored", page.evaluate("() => marqueeChecks.geometry()"));
             });
             }
-            scenario(browser, engine, "disposal restores owned properties and ignores later events; reinitialize", 768, true, false, false, (page, evidence) -> {
+            scenario(browser, engine, "a detached and reinserted root keeps its page-lifetime binding", 768, true, false, false, (page, evidence) -> {
                 state(page, 0, "running");
                 page.evaluate("""
                     () => {
                       const h = marqueeChecks;
-                      h.controls.forEach(control => control.dispose()); h.identities();
-                      h.initial.forEach((entry, i) => {
-                        h.assert(h.state(i) === entry.state && entry.toggle.hidden === entry.hidden && entry.toggle.disabled === entry.disabled && entry.toggle.textContent === entry.text,
-                          'dispose restores original state and toggle ' + i);
-                        h.assert(entry.list.style.length === 0 && entry.items.every(item => item.style.length === 0), 'dispose clears owned styles ' + i);
-                        h.flow(i);
-                      });
-                      // Caller-owned values and priorities must survive another complete lifecycle.
-                      const list = h.initial[0].list;
-                      ['--paste-marquee-distance', '--paste-marquee-item-size', '--paste-marquee-row-height', '--paste-marquee-duration']
-                        .forEach((name, i) => list.style.setProperty(name, i === 3 ? '9s' : '9px', 'important'));
-                      list.style.setProperty('color', 'rgb(1, 2, 3)');
-                      h.expected[0].forEach(item => item.style.setProperty('--paste-marquee-delay', '2s', 'important'));
-                      h.roots[0].setAttribute('data-paste-marquee-state', 'caller-state');
-                      h.initial[0].toggle.textContent = 'Caller control';
-                      h.savedOwned = h.owned();
-                      const old = h.controls;
-                      h.controls = h.roots.map(root => h.module.init(root));
-                      h.controls.forEach((control, i) => h.assert(control !== old[i], 'new controller after disposal ' + i));
-                      h.controls.forEach(control => { control.dispose(); control.dispose(); });
-                      h.assert(JSON.stringify(h.owned()) === JSON.stringify(h.savedOwned), 'exact owned values and priorities restored');
-                      h.assert(list.style.getPropertyValue('color') === 'rgb(1, 2, 3)', 'unowned caller style preserved');
-                      h.lateMutations = [];
-                      h.watch = new MutationObserver(records => h.lateMutations.push(...records.map(r => r.attributeName)));
-                      h.roots.forEach(root => h.watch.observe(root, {subtree: true, attributes: true, childList: true, characterData: true}));
-                      h.controls.forEach(control => { control.pause(); control.resume(); control.refresh(); control.dispose(); });
-                      h.initial[0].toggle.dispatchEvent(new MouseEvent('click', {bubbles: true}));
-                      h.initial[0].list.dispatchEvent(new FocusEvent('focusin', {bubbles: true}));
-                      h.initial[0].list.dispatchEvent(new FocusEvent('focusout', {bubbles: true}));
+                      h.detached = h.roots[0];
+                      h.detachedParent = h.detached.parentElement;
+                      h.detachedNext = h.detached.nextSibling;
+                      h.detached.remove();
                     }
                     """);
-                page.setViewportSize(375, 1200);
-                page.emulateMedia(new Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.REDUCE));
-                page.waitForTimeout(180);
-                page.emulateMedia(new Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.NO_PREFERENCE));
-                page.waitForTimeout(180);
-                evidence.put("disposed", page.evaluate("""
-                    () => {
-                      const h = marqueeChecks;
-                      h.assert(h.lateMutations.length === 0, 'no disposed callback mutates DOM after methods/events/resize/media', h.lateMutations);
-                      h.assert(JSON.stringify(h.owned()) === JSON.stringify(h.savedOwned), 'disposed styles/state remain restored');
-                      h.watch.disconnect(); h.identities(); h.roots.forEach((root, i) => h.flow(i));
-                      const result = {owned: h.owned(), lateMutations: h.lateMutations};
-                      // Remove the caller's seeded geometry after verifying restoration; test ordinary reinitialization here.
-                      // A separate important-geometry scenario exercises motion with those values still present.
-                      h.savedOwned[0].properties.forEach(([name]) => h.initial[0].list.style.removeProperty(name));
-                      h.expected[0].forEach(item => item.style.removeProperty('--paste-marquee-delay'));
-                      h.controls = h.roots.map(root => h.module.init(root));
-                      return result;
-                    }
-                    """));
-                state(page, 0, "running"); identities(page);
-                page.locator("[data-paste-marquee]").first().locator("button").click();
-                state(page, 0, "paused"); page.evaluate("() => marqueeChecks.flow(0)");
-                page.locator("[data-paste-marquee]").first().locator("button").click();
+                // There is no unmount step to run: the binding lives
+                // as long as the page does, so the detached subtree keeps
+                // its enhancement state rather than being unwound.
+                page.waitForTimeout(150);
+                page.evaluate("() => marqueeChecks.assert(marqueeChecks.detached.hasAttribute('data-paste-marquee-state'), 'a detached root was unwound as if a lifecycle controller existed')");
+                page.evaluate("() => marqueeChecks.detachedParent.insertBefore(marqueeChecks.detached, marqueeChecks.detachedNext)");
+                // The same binding still governs the reinserted root —
+                // no rebind and no second measurement set was needed.
                 state(page, 0, "running");
-                nativeMotion(page, evidence, "reinitializedMotion", 180);
+                page.evaluate("() => marqueeChecks.initial[0].toggle.dispatchEvent(new MouseEvent('click', {bubbles: true}))");
+                state(page, 0, "paused");
+                page.evaluate("() => marqueeChecks.initial[0].toggle.dispatchEvent(new MouseEvent('click', {bubbles: true}))");
+                state(page, 0, "running");
+                identities(page);
+                // The same binding drives the same CSS animation after
+                // reinsertion — nativeMotion re-reads the identical
+                // Animation object and watches its timeline advance.
+                nativeMotion(page, evidence, "reinsertedMotion", 180);
             });
-            scenario(browser, engine, "preexisting important geometry is refreshed before motion", 768, true, false, false, (page, evidence) -> {
+            scenario(browser, engine, "foreign document mutations never reach the marquee", 768, true, false, false, (page, evidence) -> {
+                state(page, 0, "running");
+                // Let the deferred coalesced refreshes from binding drain
+                // before planting the sentinel, so a still-in-flight
+                // bind-time remeasure cannot be mistaken for a foreign one.
+                page.waitForTimeout(150);
+                // A remeasure would rewrite the owned distance. Plant a
+                // plainly-invalid sentinel on it, mutate elsewhere in the
+                // document, and confirm the sentinel stands — the module's
+                // only watch surface is its own list.
                 page.evaluate("""
                     () => {
-                      const h = marqueeChecks; h.controls[0].dispose();
+                      const h = marqueeChecks;
+                      h.sentinel = '1px';
+                      h.initial[0].list.style.setProperty('--paste-marquee-distance', h.sentinel);
+                      for (let i = 0; i < 3; i++) {
+                        const stray = document.createElement('div');
+                        stray.textContent = 'unrelated';
+                        document.body.append(stray); stray.remove();
+                      }
+                      h.roots[0].setAttribute('data-paste-marquee-duration', '10');
+                    }
+                    """);
+                page.waitForTimeout(150);
+                page.evaluate("""
+                    () => {
+                      const h = marqueeChecks;
+                      h.assert(h.initial[0].list.style.getPropertyValue('--paste-marquee-distance') === h.sentinel,
+                        'a foreign document mutation or a duration attribute write triggered a remeasure');
+                    }
+                    """);
+                // A legitimate remeasure still works when it is actually
+                // wanted — resize is a real input.
+                page.setViewportSize(600, 1200);
+                page.waitForFunction("() => marqueeChecks.initial[0].list.style.getPropertyValue('--paste-marquee-distance') !== marqueeChecks.sentinel");
+                state(page, 0, "running");
+            });
+            scenario(browser, engine, "overwritten important geometry is corrected on the next real input", 768, true, false, false, (page, evidence) -> {
+                state(page, 0, "running");
+                page.evaluate("""
+                    () => {
+                      const h = marqueeChecks;
                       h.initial[0].list.style.setProperty('--paste-marquee-distance', '9px', 'important');
                       h.initial[0].list.style.setProperty('--paste-marquee-item-size', '9px', 'important');
-                      h.controls[0] = h.module.init(h.roots[0]);
                     }
                     """);
+                // The correction lands through a real geometry input —
+                // an attribute write is not a command channel.
+                page.setViewportSize(600, 1200);
+                page.waitForFunction("() => marqueeChecks.initial[0].list.style.getPropertyPriority('--paste-marquee-distance') === '' && marqueeChecks.initial[0].list.style.getPropertyValue('--paste-marquee-distance') !== '9px'");
                 state(page, 0, "running");
                 evidence.put("owned", page.evaluate("() => marqueeChecks.owned()"));
                 evidence.put("geometry", page.evaluate("() => marqueeChecks.geometry()"));
                 evidence.put("wraps", page.evaluate("() => marqueeChecks.wraps()"));
             });
-            scenario(browser, engine, "two shortened cycles advance under native CSS time", 768, true, false, false, (page, evidence) -> {
-                page.evaluate("() => { marqueeChecks.roots[0].setAttribute('data-paste-marquee-duration', '0.7'); marqueeChecks.controls[0].refresh(); }");
-                state(page, 0, "running");
-                nativeMotion(page, evidence, "shortCycles", 1530);
-                page.evaluate("() => marqueeChecks.assert(marqueeChecks.motion.animation.currentTime - marqueeChecks.motion.startTime >= 1400, 'observed at least two configured CSS cycles')");
-                evidence.put("wraps", page.evaluate("() => marqueeChecks.wraps()"));
-            });
+            // A gap the module cannot resolve to pixels on its own — a
+            // calc() mixing a length and a percentage — is measured from
+            // the laid-out row, so each root settles into one state
+            // instead of flipping between running and static.
+            scenario(browser, engine, "a calc() gap settles into one state", 768, true, false, false,
+                page -> {
+                    page.addInitScript("""
+                        (() => {
+                          window.marqueeStateLog = [];
+                          document.addEventListener('readystatechange', () => {
+                            if (document.readyState !== 'interactive') return;
+                            document.querySelectorAll('[data-paste-marquee]').forEach((root, i) =>
+                              new MutationObserver(records => records.forEach(record =>
+                                window.marqueeStateLog.push([i, record.target.getAttribute('data-paste-marquee-state')])))
+                                .observe(root, {attributes: true, attributeFilter: ['data-paste-marquee-state']}));
+                          });
+                        })()
+                        """);
+                    page.route("**/*", route -> {
+                        if (!route.request().resourceType().equals("document")) {
+                            route.resume();
+                            return;
+                        }
+                        APIResponse fixture = route.fetch();
+                        String html = new String(fixture.body(), StandardCharsets.UTF_8)
+                            .replace("</head>", "<style>.paste-ui-marquee{--paste-marquee-gap:calc(1rem + 1%)}</style></head>");
+                        route.fulfill(new Route.FulfillOptions().setResponse(fixture).setBody(html));
+                    });
+                },
+                (page, evidence) -> {
+                    page.waitForTimeout(1000);
+                    Object gap = page.evaluate("() => getComputedStyle(marqueeChecks.initial[0].list).columnGap");
+                    List<?> log = (List<?>) page.evaluate("() => window.marqueeStateLog");
+                    evidence.put("computedGap", gap);
+                    evidence.put("transitions", log.size());
+                    evidence.put("firstTransitions", log.subList(0, Math.min(8, log.size())));
+                    require(String.valueOf(gap).contains("%"), "the injected gap did not keep its percentage: " + gap);
+                    for (int root = 0; root < 3; root += 1) {
+                        final int index = root;
+                        long count = log.stream().filter(entry -> ((Number) ((List<?>) entry).get(0)).intValue() == index).count();
+                        require(count <= 2, "root " + root + " changed state " + count + " times in a second: "
+                            + log.subList(0, Math.min(8, log.size())));
+                    }
+                    String settled = String.valueOf(page.evaluate("() => marqueeChecks.state(0)"));
+                    page.waitForTimeout(300);
+                    require(settled.equals(page.evaluate("() => marqueeChecks.state(0)")), "root 0 left its settled state");
+                    evidence.put("settled", settled);
+                    evidence.put("distance", page.evaluate("() => marqueeChecks.initial[0].list.style.getPropertyValue('--paste-marquee-distance')"));
+                });
+            scenario(browser, engine, "the authored cycle completes two wraps under native CSS time", 768, true, false, false,
+                page -> page.route("**/*", route -> {
+                    // A short duration is authored into the fixture's first
+                    // marquee before the module evaluates — the two-cycle
+                    // observation below exercises the same native-time wrap
+                    // path the production 45s cycle takes, at a watchable
+                    // length.
+                    if (!route.request().resourceType().equals("document")) {
+                        route.resume();
+                        return;
+                    }
+                    APIResponse fixture = route.fetch();
+                    String html = new String(fixture.body(), StandardCharsets.UTF_8)
+                        .replace("data-paste-marquee-duration=\"45\"",
+                            "data-paste-marquee-duration=\"0.4\"");
+                    route.fulfill(new Route.FulfillOptions().setResponse(fixture).setBody(html));
+                }),
+                (page, evidence) -> {
+                    state(page, 0, "running");
+                    page.evaluate("() => marqueeChecks.assert(marqueeChecks.initial[0].list.style.getPropertyValue('--paste-marquee-duration') === '0.4s', 'the authored short duration was not adopted at bind')");
+                    nativeMotion(page, evidence, "authoredCycle", 1200);
+                    page.evaluate("() => marqueeChecks.assert(marqueeChecks.motion.animation.currentTime - marqueeChecks.motion.startTime >= 800, 'two complete authored cycles did not elapse under native CSS time')");
+                    evidence.put("wraps", page.evaluate("() => marqueeChecks.wraps()"));
+                });
         }
     }
 
     public static void main(String[] args) throws Exception {
         url = args.length > 0 ? args[0] : "http://127.0.0.1:8077/";
-        output = Path.of(args.length > 1 ? args[1] : "target/browser-checks");
+        output = Path.of(args.length > 1 ? args[1] : "target/browser-checks")
+            .toAbsolutePath().normalize();
+        if (!output.startsWith(Path.of("").toAbsolutePath())) {
+            throw new IllegalArgumentException("the results directory must stay inside the working directory");
+        }
         Files.createDirectories(output);
         try (Playwright playwright = Playwright.create()) {
-            for (String engine : List.of("chromium", "webkit")) {
+            for (String engine : List.of("chromium", "firefox", "webkit")) {
                 try { runBrowser(playwright, engine); }
                 catch (Throwable error) {
                     RESULTS.add(Map.of("browser", engine, "name", "browser launch/runtime", "passed", false, "failure", error.toString()));

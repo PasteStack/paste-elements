@@ -9,11 +9,20 @@
         .paste-ui-hero {
             position: relative;
             min-height: 100vh;
+            overflow: hidden;
+        }
+        .paste-ui-hero-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 100vh;
             background-size: cover;
-            background-position: center;
+            background-position: center 0;
             background-image: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
         .paste-ui-hero-content {
+            position: relative;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -24,30 +33,43 @@
         }
         .paste-ui-hero-content h1 { font-size: 3rem; margin: 0; }
         .paste-ui-hero-content p { font-size: 1.25rem; opacity: 0.9; }
-        .content { padding: 4rem 2rem; max-width: 800px; margin: 0 auto; }
+        .content { padding: 4rem 2rem; max-width: 800px; margin: 0 auto; min-height: 150vh; }
     </style>
 </head>
 <body>
-    <section class="paste-ui-hero" 
-             id="hero-main" 
-             data-paste-hero="main" 
-             data-paste-parallax="true">
+    <!-- The hero reads well without the module: the parallax background
+         position and the image fade are enhancements on top. -->
+    <section class="paste-ui-hero" id="hero-main">
+        <div class="paste-ui-hero-image" force-full-height data-hero-image-fade></div>
         <div class="paste-ui-hero-content">
             <h1>Hero Scroll Demo</h1>
-            <p>Scroll down to see parallax effect</p>
+            <p>Scroll down to see the parallax effect</p>
         </div>
     </section>
-    
+
     <div class="content">
         <h2>Content Below Hero</h2>
         <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
         <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
     </div>
-    
-    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/paste.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/dom.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/event.js"></script>
-    <script src="../src/js/throttle.js"></script>
-    <script src="../src/js/heroscroll.js"></script>
+
+    <!-- Served by tests/serve-examples.cjs: /js/paste/ resolves into the
+         paste core named by PASTE_CORE_JS, /js/paste/ui/ into this
+         repository's modules/. heroscroll declares paste.util, paste.dom,
+         paste.event, paste.has, the animation-frame and mediaquery
+         utilities and the getComputedStyle polyfill; paste.event itself
+         needs paste.guid and paste.util, and paste.dom needs paste.util
+         and paste.oop. Each script follows the scripts it depends on. -->
+    <script src="/js/paste/paste.js"></script>
+    <script src="/js/paste/guid.js"></script>
+    <script src="/js/paste/util.js"></script>
+    <script src="/js/paste/oop.js"></script>
+    <script src="/js/paste/dom.js"></script>
+    <script src="/js/paste/event.js"></script>
+    <script src="/js/paste/has.js"></script>
+    <script src="/js/paste/polyfills/getcomputedstyle.js"></script>
+    <script src="/js/paste/ui/utilities/animation-frame.js"></script>
+    <script src="/js/paste/ui/utilities/mediaquery.js"></script>
+    <script src="/js/paste/ui/heroscroll.js"></script>
 </body>
 </html>
