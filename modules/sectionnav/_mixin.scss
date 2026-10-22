@@ -2,6 +2,29 @@
 // Paste Elements - Section Nav Mixin
 // ==========================================================================
 
+// $target-clearance: how far below the viewport top a fragment target
+// lands, so a fixed or sticky nav does not cover it. auto is the nav's
+// own box — $height plus the width $border-bottom names first — and
+// null leaves targets to the page. The rule is a zero-specificity
+// scroll-margin-top on :where(:target), and on the hero without an id
+// that a data-hero-hashclick click last scrolled to (heroscroll marks
+// it .paste-ui-hero-destination until the next hash click, since it
+// is no target), so any scroll-margin rule the page writes for its
+// targets wins, and the --paste-ui-section-nav-clearance custom
+// property replaces the value at runtime (for example a site header's
+// height plus the nav's).
+// Browsers read it when they scroll to a fragment: link navigation and
+// a page loaded with a fragment. Back and Forward restore positions
+// instead. A target's scroll-margin adds to the scroller's
+// scroll-padding, so a page that clears its chrome with
+// scroll-padding-top sets the custom property to 0px, or passes null,
+// and the clearance is not counted twice. scroll-margin also grows a
+// scroll-snap area: on a page that snaps, the current target and the
+// marked hero may rest the clearance lower than their neighbours, and
+// one whose area outgrows the viewport no longer snaps firmly; other
+// heroes are untouched. A snapping page clears its chrome with
+// scroll-padding-top on the scroller, which moves every snap position
+// alike, and zeroes the custom property.
 @mixin paste-ui-sectionnav(
   $height: 50px,
   $background: #fff,
@@ -11,8 +34,27 @@
   $link-hover-color: #0A56A2,
   $font-size: 0.875rem,
   $max-width: 1016px,
-  $breakpoint: 768px
+  $breakpoint: 768px,
+  $target-clearance: auto
 ) {
+  @if $target-clearance {
+    $clearance: $target-clearance;
+    @if $clearance == auto {
+      $border-width: nth($border-bottom, 1);
+      @if type-of($border-width) != number {
+        $border-width: 0px;
+      }
+      @if comparable($height, $border-width) {
+        $clearance: $height + $border-width;
+      } @else {
+        $clearance: calc(#{$height} + #{$border-width});
+      }
+    }
+    :where(:target, .paste-ui-hero-destination) {
+      scroll-margin-top: var(--paste-ui-section-nav-clearance, #{$clearance});
+    }
+  }
+
   .paste-ui-section-nav {
     display: none;
     background-color: $background;

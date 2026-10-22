@@ -1,0 +1,11 @@
+# Source archives (git archive, and the archive downloads GitHub and
+# GitLab build from it) carry only what a consumer builds from. The test
+# suites, their vendored development tools and the example pages stay in
+# the repository for development and are left out of every archive.
+# Each directory is named both bare and with /** so the attribute holds
+# for the directory entry and for every file beneath it; a pattern with
+# only a trailing slash never matches the files themselves.
+/tests export-ignore
+/tests/** export-ignore
+/examples export-ignore
+/examples/** export-ignore

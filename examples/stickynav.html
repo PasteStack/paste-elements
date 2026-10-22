@@ -5,7 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sticky Nav Example - Paste Elements</title>
     <style>
+        :root {
+            /* The site header's height and the sub-navigation's height:
+               the stuck nav sits directly beneath the header, and its
+               slot keeps the nav's height while the nav is fixed. */
+            --site-nav-height: 3.5rem;
+            --sub-nav-height: 3.5rem;
+        }
         body { margin: 0; font-family: sans-serif; }
+        /* The module sticks the nav when the page has scrolled to the
+           nav's slot less this wrapper's height, so the wrapper is a
+           header that stays at the top of the viewport. */
+        #_paste_ui_nav_wrap {
+            position: sticky;
+            top: 0;
+            z-index: 1001;
+            box-sizing: border-box;
+            height: var(--site-nav-height);
+            display: flex;
+            align-items: center;
+            background: #333;
+            color: white;
+            padding: 0 2rem;
+        }
+        #paste-ui-nav a { color: white; margin-right: 1.5rem; text-decoration: none; }
         .hero {
             height: 60vh;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -15,57 +38,88 @@
             color: white;
         }
         .hero h1 { font-size: 3rem; }
-        nav {
+        /* The slot holds the nav's place in the flow, so the content
+           below does not move up when the nav leaves the flow. */
+        .sticky-nav-slot { height: var(--sub-nav-height); }
+        .sticky-nav-target {
+            box-sizing: border-box;
+            height: var(--sub-nav-height);
             background: white;
-            padding: 1rem 2rem;
+            padding: 0 2rem;
             display: flex;
+            align-items: center;
             gap: 2rem;
             border-bottom: 1px solid #eee;
         }
-        nav a { color: #333; text-decoration: none; }
-        nav a:hover { color: #667eea; }
-        .paste-ui-sticky-active {
+        .sticky-nav-target a { color: #333; text-decoration: none; }
+        .sticky-nav-target a:hover { color: #667eea; }
+        /* The module only toggles the paste-fixed-subnav body class on the
+           stick and unstick transitions; presenting the stuck state is the
+           page's CSS. The module never clones or moves authored content. */
+        .paste-fixed-subnav .sticky-nav-target {
             position: fixed;
-            top: 0;
+            top: var(--site-nav-height);
             left: 0;
             right: 0;
             z-index: 1000;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .content { padding: 4rem 2rem; max-width: 800px; margin: 0 auto; }
-        section { min-height: 50vh; padding: 2rem; }
+        .fixed-nav-content { display: none; }
+        .paste-fixed-subnav .fixed-nav-content { display: inline; margin-left: auto; }
+        section { min-height: 60vh; padding: 2rem; }
     </style>
 </head>
 <body>
-    <div class="hero" data-paste-sticky-target="true">
+    <div id="_paste_ui_nav_wrap">
+        <nav id="paste-ui-nav">
+            <a href="#section1">Home</a>
+            <a href="#section3">About</a>
+        </nav>
+    </div>
+
+    <div class="hero">
         <h1>Sticky Nav Demo</h1>
     </div>
-    
-    <nav data-paste-sticky-nav>
-        <a href="#section1">Section 1</a>
-        <a href="#section2">Section 2</a>
-        <a href="#section3">Section 3</a>
-    </nav>
-    
-    <section id="section1">
-        <h2>Section 1</h2>
-        <p>Scroll down to see the navigation become sticky after passing the hero.</p>
-    </section>
-    
-    <section id="section2">
-        <h2>Section 2</h2>
-        <p>The navigation stays fixed at the top while scrolling through content.</p>
-    </section>
-    
-    <section id="section3">
-        <h2>Section 3</h2>
-        <p>Scroll back up to see the navigation return to its original position.</p>
-    </section>
-    
-    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/paste.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/dom.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/PasteStack/paste@main/src/js/event.js"></script>
-    <script src="../src/js/throttle.js"></script>
-    <script src="../src/js/stickynav.js"></script>
+
+    <div class="sticky-nav-slot">
+        <nav class="sticky-nav-target" aria-label="Sections">
+            <a href="#section1">Section 1</a>
+            <a href="#section2">Section 2</a>
+            <a href="#section3">Section 3</a>
+            <span class="fixed-nav-content">Shown only while stuck</span>
+        </nav>
+    </div>
+
+    <div id="content">
+        <section id="section1">
+            <h2>Section 1</h2>
+            <p>Scroll down to see the navigation become sticky after passing the hero.</p>
+        </section>
+
+        <section id="section2">
+            <h2>Section 2</h2>
+            <p>The navigation stays fixed beneath the site header while scrolling through content.</p>
+        </section>
+
+        <section id="section3">
+            <h2>Section 3</h2>
+            <p>Scroll back up to see the navigation return to its slot.</p>
+        </section>
+    </div>
+
+    <!-- Served by tests/serve-examples.cjs: /js/paste/ resolves into the
+         paste core named by PASTE_CORE_JS, /js/paste/ui/ into this
+         repository's modules/. stickynav declares paste.dom, paste.event,
+         paste.has and the animation-frame utility; paste.dom needs
+         paste.util and paste.oop, paste.event needs paste.guid. -->
+    <script src="/js/paste/paste.js"></script>
+    <script src="/js/paste/guid.js"></script>
+    <script src="/js/paste/util.js"></script>
+    <script src="/js/paste/oop.js"></script>
+    <script src="/js/paste/dom.js"></script>
+    <script src="/js/paste/event.js"></script>
+    <script src="/js/paste/has.js"></script>
+    <script src="/js/paste/ui/utilities/animation-frame.js"></script>
+    <script src="/js/paste/ui/stickynav.js"></script>
 </body>
 </html>
