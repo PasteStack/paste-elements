@@ -1,0 +1,12 @@
+/*
+ * @module paste.ui.imagesequence.style
+ * Optional, non-overriding defaults for a declared sequence host: a
+ * non-img [data-paste-imagesequence] host is a block whose painted
+ * background centers and covers. The rule carries zero specificity, so
+ * the page's own CSS always wins; layout, sizing, crop and fit stay the
+ * page's, and the authored baseline image lives there too, so media
+ * conditions can pick it.
+ */
+@import "mixin";
+
+@include paste-ui-imagesequence();

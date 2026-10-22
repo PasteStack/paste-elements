@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scrollscrub — reading position</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.6; }
+article { max-width: 34rem; margin: 2rem 0; position: relative; }
+.meter { height: 5px; background: #e4e4e4; position: sticky; top: 0; }
+.meter-fill {
+    background: #c78a1e; display: block; height: 100%;
+    transform-origin: 0 50%;
+    transform: scaleX(var(--paste-scrub-progress, 0));
+}
+.spacer { height: 60vh; color: #888; display: flex; align-items: center; }
+</style>
+</head>
+<body>
+<h1>Reading position</h1>
+<div class="spacer">Scroll down — the article below owns the declaration.</div>
+
+<article id="reading" data-paste-scrollscrub>
+<div class="meter"><i class="meter-fill"></i></div>
+<p>The article carries the declaration; the module measures its traverse
+and publishes one custom property. The bar above is plain CSS reading
+that property — no readout code exists anywhere.</p>
+<p>As the article crosses the scrollport from entering to exiting, the
+property travels 0 to 1, so the bar fills left to right. The visual
+change is authored here in the stylesheet; the module only measures.</p>
+<p>A declared window narrows the span — this article uses the defaults,
+so its whole enter-to-exit traverse maps onto the fill.</p>
+<p>More filler so the article has enough extent to produce a usable
+range. The point is the measure, not the content.</p>
+<p>And a little more. Without the module the bar simply never fills —
+the authored page is complete either way.</p>
+</article>
+<div class="spacer">End of scroll range.</div>
+
+<script src="/js/paste/paste.js"></script>
+<script src="/js/paste/guid.js"></script>
+<script src="/js/paste/util.js"></script>
+<script src="/js/paste/event.js"></script>
+<script src="/js/paste/ui/utilities/animation-frame.js"></script>
+<script src="/js/paste/ui/utilities/scrollrange.js"></script>
+<script src="/js/paste/ui/scrollscrub.js"></script>
+</body>
+</html>
