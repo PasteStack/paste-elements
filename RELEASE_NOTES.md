@@ -1,3 +1,42 @@
+# paste-elements v0.6.0
+
+**Date:** 2026-10-22
+
+## Added
+
+- `paste.ui.imagesequence`: declarative scroll- or time-driven image
+  sequences on a frame host, with adaptive manifests resolved against the
+  element's rendered size and BFCache-safe restore behaviour.
+- `paste.ui.progressiveresolution`: standalone images that upgrade their
+  `src`/`srcset` representation as layout settles, with per-descriptor
+  intrinsic sizes and lazy reveal inside nested scrollers.
+- `paste.ui.scrollscrub`: scrub-driven playhead mapping between declared
+  window bounds, shared by the sequence elements.
+- Shared helpers moved under `modules/utilities/` — animation-frame,
+  throttle, imageresolution, mediaquery and scrollrange — so elements
+  compose them rather than duplicating timing and media logic.
+
+## Changed
+
+- Elements that repaint shared style properties now record their own
+  last-written value and priority, restoring or removing only while they
+  still own it; a newer writer is never clobbered and `!important` is
+  preserved.
+- Observer callbacks treat records as untrusted input: entry lengths are
+  bounded and each record's target is validated against the module's own
+  index before use.
+- Teardown is terminal — queued and deferred work cannot fire after
+  teardown, and a failing cleanup in one root cannot strand its siblings.
+- Where MutationObserver, child observation or a media query cannot be
+  observed, elements stand down to their authored static presentation.
+- The marquee binds at definition time, and the sticky nav measures its
+  threshold from a flow sentinel instead of geometry reads.
+
+## Removed
+
+- The `animation-frame` and `throttle` top-level module directories;
+  both now live under `modules/utilities/`.
+
 # paste-elements v0.5.0
 
 **Date:** 2026-09-30

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>progressiveresolution — three images</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.5; }
+.row { display: flex; gap: 2rem; align-items: flex-end; }
+figure { margin: 0; }
+figcaption { font-size: .8rem; color: #555; }
+img { display: block; width: 100%; height: auto; }
+.small img { width: 80px; }
+.medium img { width: 240px; }
+.wide { max-width: 640px; margin-top: 2rem; }
+/* The declared policy: this column caps resolution upgrades at 640 CSS
+   px of intrinsic width, whatever the device ratio asks for. */
+.capped { --paste-resolution-max-width: 640; }
+</style>
+</head>
+<body>
+<h1>Progressive resolution</h1>
+<p>Each image stands alone — a usable baseline plus an inert upgrade
+descriptor. The module only raises the resolution when the painted
+dimensions and device ratio justify it, and lowering the declared cap
+never replaces an already-shown image with a worse one.</p>
+
+<div class="row">
+<figure class="small">
+<img id="avatar" src="/generated/img/avatar/r0.png" width="80" height="80" alt="Avatar at 80px"
+     data-paste-progressiveresolution
+     data-image-sources="#avatar-sources">
+<script id="avatar-sources" type="application/json">{
+    "src": "/generated/img/avatar/r0.png", "width": 80, "height": 80,
+    "upgrades": [
+        {"src": "/generated/img/avatar/r1.png", "width": 160, "height": 160},
+        {"src": "/generated/img/avatar/r2.png", "width": 320, "height": 320}
+    ]
+}</script>
+<figcaption>80px paint — needs 160+ on a 2× display</figcaption>
+</figure>
+
+<figure class="medium">
+<img id="product" src="/generated/img/product/r0.png" width="240" height="180" alt="Product at 240px"
+     data-paste-progressiveresolution
+     data-image-sources="#product-sources">
+<script id="product-sources" type="application/json">{
+    "src": "/generated/img/product/r0.png", "width": 240, "height": 180,
+    "upgrades": [
+        {"src": "/generated/img/product/r1.png", "width": 480, "height": 360},
+        {"src": "/generated/img/product/r2.png", "width": 960, "height": 720}
+    ]
+}</script>
+<figcaption>240px paint — 2× display picks 480</figcaption>
+</figure>
+</div>
+
+<div class="wide capped">
+<figure>
+<img id="wide" src="/generated/img/hero/r0.png" width="640" height="360" alt="Hero at 640px"
+     data-paste-progressiveresolution
+     data-image-sources="#wide-sources">
+<script id="wide-sources" type="application/json">{
+    "src": "/generated/img/hero/r0.png", "width": 640, "height": 360,
+    "upgrades": [
+        {"src": "/generated/img/hero/r1.png", "width": 1280, "height": 720}
+    ]
+}</script>
+<figcaption>capped at 640 — even a 2× display keeps the base URL</figcaption>
+</figure>
+</div>
+
+<script src="/js/paste/paste.js"></script>
+<script src="/js/paste/guid.js"></script>
+<script src="/js/paste/util.js"></script>
+<script src="/js/paste/event.js"></script>
+<script src="/js/paste/ui/utilities/animation-frame.js"></script>
+<script src="/js/paste/ui/utilities/imageresolution.js"></script>
+<script src="/js/paste/ui/utilities/mediaquery.js"></script>
+<script src="/js/paste/ui/progressiveresolution.js"></script>
+</body>
+</html>
