@@ -61,9 +61,36 @@ test:
     - echo "paste core under test at $(git -C "$CI_PROJECT_DIR/target/paste" rev-parse HEAD)"
     - test "$(git -C "$CI_PROJECT_DIR/target/paste" rev-parse HEAD)" = "$PASTE_CORE_SHA"
     - export PASTE_CORE_JS="$CI_PROJECT_DIR/target/paste/src/js"
-    # The Element behaviour checks are the repository's own suite (Node's test
-    # runner, no dependencies). Running them here is what keeps them honest.
-    - node --test 'tests/*.test.cjs'
+    # Keep the complete gate's compiler, drivers and browser matrix reproducible.
+    - apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk-headless unzip
+    - npm install --prefix target/playwright --no-package-lock --ignore-scripts playwright@1.41.0 terser@5.50.0 sass@1.105.2
+    - node target/playwright/node_modules/playwright/cli.js install-deps chromium firefox webkit
+    - node target/playwright/node_modules/playwright/cli.js install firefox webkit
+    - curl --fail --location --retry 3 https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.34/linux64/chrome-headless-shell-linux64.zip -o target/chromium.zip
+    - echo "3cfc2bd00d1bafcf8a68dc74c9c92bb7150ddc8d26ade948a776316e1cec4f14  target/chromium.zip" | sha256sum --check
+    - unzip -q target/chromium.zip -d target
+    - export ELEMENTS_CHROMIUM_EXECUTABLE="$CI_PROJECT_DIR/target/chrome-headless-shell-linux64/chrome-headless-shell"
+    - export MARQUEE_CHROMIUM_EXECUTABLE="$ELEMENTS_CHROMIUM_EXECUTABLE"
+    - export ELEMENTS_BROWSER_EXECUTABLE="$ELEMENTS_CHROMIUM_EXECUTABLE"
+    - mkdir -p target/playwright-java
+    - |
+      for artifact in playwright driver driver-bundle; do
+        curl --fail --location --retry 3 "https://repo.maven.apache.org/maven2/com/microsoft/playwright/$artifact/1.41.0/$artifact-1.41.0.jar" -o "target/playwright-java/$artifact.jar"
+      done
+    - curl --fail --location --retry 3 https://repo.maven.apache.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar -o target/playwright-java/gson.jar
+    - curl --fail --location --retry 3 https://gitlab.com/api/v4/projects/76219588/packages/generic/paste-assetgraph/0.3.1/paste-assetgraph-linux-amd64-musl -o target/paste-assetgraph
+    - echo "92222fd1ca5e6a23928d81d2c660a67aa1173aad9d9d47293658c429bd95ffdd  target/paste-assetgraph" | sha256sum --check
+    - chmod +x target/paste-assetgraph
+    - export PASTE_ASSETGRAPH_BIN="$CI_PROJECT_DIR/target/paste-assetgraph"
+    - export PLAYWRIGHT_MODULE="$CI_PROJECT_DIR/target/playwright/node_modules/playwright"
+    - export TERSER_MODULE="$CI_PROJECT_DIR/target/playwright/node_modules/terser"
+    - export PASTE_SASS_MODULE="$CI_PROJECT_DIR/target/playwright/node_modules/sass"
+    - export PLAYWRIGHT_JAVA_CLASSPATH="$CI_PROJECT_DIR/target/playwright-java/*"
+    - bash tests/run-all-checks.sh
+  artifacts:
+    when: always
+    paths: [target/all-checks/, target/browser-checks/, target/browser-checks-elements/, target/*-probes.json]
+    expire_in: 7 days
 
 publish:
   extends: [.tomshley-cicd-publish-generic]

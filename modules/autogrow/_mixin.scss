@@ -2,24 +2,17 @@
 // Paste Elements - Autogrow Textarea Mixin
 // ==========================================================================
 
-// $transition is kept for callers that pass it, but emits nothing by
-// default: each sizing pass holds the field's transitions while it
-// collapses the height to measure the content and writes the result, so
-// a height transition never runs on the module's sizing. A value passed
-// here still applies to everything else, the native resize handle
-// included.
+// Growth uses the author's transitions without overriding them.
 @mixin paste-ui-autogrow(
   $min-height: 80px,
   $max-height: 400px,
   $transition: null
 ) {
-  [data-paste-autogrow] {
+  & {
     min-height: $min-height;
     max-height: $max-height;
     overflow-y: auto;
-    // Native resize stays: with no JavaScript the browser's own
-    // affordance must still work, and with the module bound a dragged
-    // height becomes the field's floor rather than being undone.
+    // Native resize remains available with or without enhancement.
     @if $transition {
       transition: $transition;
     }

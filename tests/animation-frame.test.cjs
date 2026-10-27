@@ -27,11 +27,7 @@ async function retainedAll(refs) {
 // host frame's timestamp. One host requestAnimationFrame carries each
 // batch; a callback's error is rethrown on its own timer task.
 
-// options.sync makes requestAnimationFrame call back before it returns,
-// as a page's synchronous flush wrapper does; options.refusals > 0 makes
-// the next calls throw, as a page wrapper that fails does;
-// options.throwAfter registers the frame and then throws, and
-// options.syncAndReal calls back at once and also registers the frame.
+// The host queues callbacks with native asynchronous semantics.
 function load(options = {}) {
     const timers = [];
     const frames = [];
@@ -41,24 +37,7 @@ function load(options = {}) {
     const window = {
         requestAnimationFrame(cb) {
             assert.equal(this, window, 'requestAnimationFrame lost its receiver');
-            if (options.refusals > 0) {
-                options.refusals -= 1;
-                throw new Error('frame refused');
-            }
             hostId += 1;
-            if (options.throwAfter) {
-                frames.push({id: hostId, cb});
-                throw new Error('wrapper failed after registering');
-            }
-            if (options.syncAndReal) {
-                cb(clock.perf);
-                frames.push({id: hostId, cb});
-                return hostId;
-            }
-            if (options.sync) {
-                cb(clock.perf);
-                return hostId;
-            }
             frames.push({id: hostId, cb});
             return hostId;
         },
@@ -85,6 +64,12 @@ function load(options = {}) {
         }
     };
 
+    if (options.prefix) {
+        window[options.prefix+'RequestAnimationFrame']=window.requestAnimationFrame;
+        window[options.prefix+'CancelAnimationFrame']=window.cancelAnimationFrame;
+        delete window.requestAnimationFrame;delete window.cancelAnimationFrame;
+    }
+    for (const name of options.missing || []) delete window[name];
     const exports = {};
     const context = {
         window,
@@ -134,26 +119,13 @@ test('one host frame per batch, delivered once in request order with the host ti
     assert.equal(seen.length, 3, 'delivered more than once');
 });
 
-test('batch times strictly increase, even when the host repeats or rewinds a frame time', () => {
-    const f = load();
-    const seen = [];
-    [100, 100, 90, 100.0001].forEach(time => {
+test('batch timestamps remain the browser clock, including a coarsened repeat', () => {
+    const f = load(), seen = [];
+    for (const time of [0, 100, 100, 100.25]) {
         f.af.request(t => seen.push(t));
         f.runFrames(time);
-    });
-    assert.equal(seen[0], 100);
-    for (let i = 1; i < seen.length; i += 1) {
-        assert.ok(seen[i] > seen[i - 1], 'batch ' + i + ' did not move forward: ' + seen.join(', '));
-        assert.ok(seen[i] - seen[i - 1] < 0.01, 'the forward step distorted the clock: ' + seen.join(', '));
     }
-    // A large clock reading still steps forward.
-    const g = load();
-    const big = [];
-    g.af.request(t => big.push(t));
-    g.runFrames(1700000000000);
-    g.af.request(t => big.push(t));
-    g.runFrames(1700000000000);
-    assert.ok(big[1] > big[0]);
+    assert.deepEqual(seen, [0, 100, 100, 100.25]);
 });
 
 test('cancel before delivery suppresses only its own request; unknown ids are ignored', () => {
@@ -421,133 +393,38 @@ test('numeric strings cannot cancel an opaque numeric request id', () => {
     assert.equal(calls, 1);
 });
 
-// Page wrappers installed over requestAnimationFrame before the module
-// loads.
-
-test('a frame delivered without a usable time is stamped from performance.now', () => {
-    const f = load();
-    const seen = [];
-    [[undefined, 300], [NaN, 316.5], ['332', 332], [Infinity, 348]].forEach(([hostTime, now]) => {
-        f.clock.perf = now;
-        f.af.request(t => seen.push(t));
-        f.runFrames(hostTime);
-    });
-    assert.deepEqual(seen, [300, 316.5, 332, 348], 'the batch clock did not follow performance.now');
-});
-
-test('a requestAnimationFrame that calls back inside the call: nothing runs early, a timer carries the batch', () => {
-    const f = load({sync: true});
-    const ran = [];
-    f.clock.perf = 100;
-    const first = f.af.request(t => ran.push(['a', t]));
-    f.af.requestPhased(t => ran.push(['read', t]), t => ran.push(['write', t]));
-    assert.deepEqual(ran, [], 'a callback ran inside request()');
-    assert.equal(f.timers.length, 1, 'the batch was not handed to one timer');
-    assert.equal(f.timers[0].delay, 20);
-    f.af.cancel(first);
-    assert.deepEqual(f.cancelled, [], 'a timer batch reached cancelAnimationFrame');
-    f.clock.perf = 120;
-    f.runTimer();
-    assert.deepEqual(ran, [['read', 120], ['write', 120]]);
-    // The scheduler keeps going: a request from a batch and one after it.
-    f.af.request(t => {
-        ran.push(['b', t]);
-        f.af.request(u => ran.push(['nested', u]));
-    });
-    assert.equal(f.timers.length, 1, 'the scheduler stopped arming after the first batch');
-    f.clock.perf = 140;
-    f.runTimer();
-    assert.deepEqual(ran.slice(2), [['b', 140]]);
-    f.clock.perf = 160;
-    f.runTimer();
-    assert.deepEqual(ran.slice(3), [['nested', 160]]);
-    assert.equal(f.timers.length, 0);
-});
-
-test('a requestAnimationFrame that throws: request returns, a timer carries the batch, later batches ask again', () => {
-    const f = load({refusals: 1});
-    const ran = [];
-    let id;
-    assert.doesNotThrow(() => { id = f.af.request(t => ran.push(['a', t])); });
-    assert.ok(typeof id === 'number' && id < 0);
-    f.af.requestPhased(t => ran.push(['read', t]), t => ran.push(['write', t]));
-    assert.equal(f.timers.length, 1, 'the refused batch was not handed to one timer');
-    assert.equal(f.frames.length, 0);
-    f.clock.perf = 90;
-    f.runTimer();
-    assert.deepEqual(ran, [['read', 90], ['a', 90], ['write', 90]]);
-    // The next request asks requestAnimationFrame again and is delivered
-    // by its frame, not left waiting behind a stuck arming state.
-    f.af.request(t => ran.push(['b', t]));
-    assert.equal(f.frames.length, 1, 'the next batch did not ask requestAnimationFrame again');
-    assert.equal(f.timers.length, 0);
-    f.runFrames(200);
-    assert.deepEqual(ran.slice(3), [['b', 200]]);
-    const later = f.af.request(() => ran.push('cancelled'));
-    f.af.cancel(later);
-    assert.equal(f.frames.length, 0, 'a later host frame could not be given back');
-});
-
-// A wrapper that refuses yet also registers the real frame leaves two
-// carriers for one batch. The first to arrive delivers it; the other is
-// stale, so a per-batch loop runs one batch per carrier pair and never
-// multiplies.
-test('a refusing wrapper that also registers the frame: one batch per arm, whichever carrier arrives first', () => {
-    ['throwAfter', 'syncAndReal'].forEach(mode => {
-        const f = load({[mode]: true});
-        let batches = 0;
-        const loop = () => {
-            batches += 1;
-            if (batches < 40) {
-                f.af.request(loop);
-            }
-        };
-        assert.doesNotThrow(() => f.af.request(loop), mode);
-        assert.equal(batches, 0, mode + ': a batch ran inside request()');
-        for (let round = 0; round < 40; round += 1) {
-            assert.equal(f.frames.length, 1, mode + ': round ' + round + ' left ' + f.frames.length + ' frames');
-            assert.equal(f.timers.length, 1, mode + ': round ' + round + ' left ' + f.timers.length + ' timers');
-            const before = batches;
-            if (round % 2 === 0) {
-                // The real frame wins: the timer is cleared.
-                f.runFrames(100 + round * 16);
-                assert.equal(batches, before + 1, mode + ': the frame did not deliver the batch once');
-            } else {
-                // The timer wins; the real frame it could not cancel
-                // arrives stale.
-                const stale = f.frames.splice(0);
-                f.runTimer();
-                assert.equal(batches, before + 1, mode + ': the timer did not deliver the batch once');
-                stale.forEach(frame => frame.cb(100 + round * 16));
-                assert.equal(batches, before + 1, mode + ': a stale frame ran a batch');
-            }
-            if (batches >= 40) {
-                break;
-            }
-            // Only the next batch's carriers remain.
-            f.timers.splice(0, f.timers.length - 1).forEach(t => t.fn());
-        }
-        assert.equal(batches, 40, mode);
-        f.frames.splice(0).forEach(frame => frame.cb(5000));
-        f.timers.splice(0).forEach(t => t.fn());
-        assert.equal(batches, 40, mode + ': a leftover carrier ran a batch');
-    });
-});
-
-test('a refusing wrapper\'s batch is given back on cancel without trusting its handle', () => {
-    ['syncAndReal', 'sync', 'throwAfter'].forEach(mode => {
-        const f = load({[mode]: true});
-        const id = f.af.request(() => assert.fail(mode + ': cancelled request ran'));
-        assert.equal(f.timers.length, 1, mode);
+for (const missing of [['requestAnimationFrame'], ['cancelAnimationFrame'], ['performance'],
+        ['requestAnimationFrame', 'cancelAnimationFrame', 'performance']]) {
+    test('frame scheduling survives absent ' + missing.join(', '), () => {
+        const f = load({missing});
+        const seen = [];
+        const id = f.af.request(time => seen.push(time));
         f.af.cancel(id);
-        assert.deepEqual(f.cancelled, [], mode + ': a refusing wrapper\'s handle reached cancelAnimationFrame');
-        assert.equal(f.timers.length, 0, mode + ': the fallback timer was not cleared');
-        f.frames.splice(0).forEach(frame => frame.cb(16));
-        let ran = 0;
-        f.af.request(() => { ran += 1; });
-        assert.equal(f.timers.length, 1, mode + ': the next batch did not arm again');
-        f.frames.splice(0).forEach(frame => frame.cb(32));
+        f.runFrames(20);
         f.timers.splice(0).forEach(t => t.fn());
-        assert.equal(ran, 1, mode);
+        assert.deepEqual(seen, []);
+        f.af.request(time => seen.push(time));
+        f.runFrames(32);
+        f.timers.splice(0).forEach(t => t.fn());
+        assert.equal(seen.length, 1);
+        assert.ok(Number.isFinite(seen[0]));
     });
+}
+
+test('historical vendor frame APIs retain scheduling and cancellation',()=>{
+ for(const prefix of ['moz','webkit','ms']){const f=load({prefix});let called=0;
+ const id=f.af.request(()=>called++);assert.equal(f.frames.length,1);assert.equal(f.timers.length,0);
+ f.af.cancel(id);assert.equal(f.cancelled.length,1);f.runFrames(10);assert.equal(called,0);
+ f.af.request(()=>called++);f.runFrames(20);assert.equal(called,1);}
+});
+test('fallback retains the historical sixteen millisecond cadence',()=>{
+ const f=load({missing:['requestAnimationFrame','cancelAnimationFrame']});
+ f.af.request(()=>{});assert.equal(f.timers[0].delay,0);f.runTimer();
+ f.af.request(()=>{});assert.equal(f.timers[0].delay,16);
+});
+
+test('cancelled fallback carriers do not accumulate future delay',()=>{
+ const f=load({missing:['requestAnimationFrame','cancelAnimationFrame']});
+ for(let i=0;i<20;i++){const id=f.af.request(()=>{});f.af.cancel(id);}
+ f.af.request(()=>{});assert.equal(f.timers[0].delay,0);
 });

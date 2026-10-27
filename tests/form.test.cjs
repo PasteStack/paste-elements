@@ -4,6 +4,7 @@ const vm = require('node:vm');
 const {readModuleSource} = require('./fakes.cjs');
 
 function matchOne(element, selector) {
+    if (selector === 'form:not([data-paste-form])') return element.tagName === 'FORM' && !element.hasAttribute('data-paste-form');
     const m = selector.match(/^([a-z]+)?(\[([a-zA-Z-]+)(="([^"]*)")?\])?$/i);
     if (!m) {
         return false;
@@ -44,11 +45,16 @@ function fixture(options = {}) {
         const attributes = new Map();
         const el = {
             tagName: tagName.toUpperCase(),
+            get id() { return attributes.get('id') || ''; },
+            set id(value) { attributes.set('id', String(value)); },
             parentElement: null,
             children: [],
+            contains(node) { return node === el || el.children.some(child => child.contains(node)); },
             focused: false,
             parsed: null,
             listeners: {},
+            get className() { return attributes.get('class') || ''; },
+            set className(value) { attributes.set('class', String(value)); },
             getAttribute: key => attributes.has(key) ? attributes.get(key) : null,
             hasAttribute: key => attributes.has(key),
             setAttribute(key, value) { attributes.set(key, String(value)); },
@@ -92,10 +98,19 @@ function fixture(options = {}) {
                 window.HTMLFormElement.prototype.requestSubmit.call(el, submitter);
             }
         };
+        const classTokens = () => el.className.split(/[\t\n\f\r ]+/).filter(Boolean);
+        el.classList = {
+            contains(token) { return classTokens().includes(token); },
+            add(token) {
+                if (!this.contains(token)) el.className = classTokens().concat(token).join(' ');
+            },
+            remove(token) { el.className = classTokens().filter(value => value !== token).join(' '); }
+        };
         let html = '';
         Object.defineProperty(el, 'innerHTML', {
             get: () => html,
             set: value => {
+                if (el.refuseHTML) { throw new TypeError('HTML assignment refused'); }
                 html = value;
                 if (el.parsed) {
                     el.children = el.parsed;
@@ -163,33 +178,15 @@ function fixture(options = {}) {
     }
 
     const io = {
-        get(url, data, onSuccess, onFailure) {
-            if (options.nullRequest) {
-                return null;
-            }
-            if (options.ioThrows) {
-                throw new Error('open refused');
-            }
+        open(method, url, onSuccess, onFailure) {
+            if (options.nullRequest) return null;
+            if (options.ioThrows) throw new Error('open refused');
             const request = fakeXhr(url);
-            ioCalls.push({kind: 'get', url, data, onSuccess, onFailure, request});
-            if (options.syncReply) {
-                // A client that answers before it returns.
-                request.reply(...options.syncReply);
-            }
-            return request;
-        },
-        post(url, data, onSuccess, onFailure) {
-            if (options.nullRequest) {
-                return null;
-            }
-            if (options.ioThrows) {
-                throw new Error('open refused');
-            }
-            const request = fakeXhr(url);
-            ioCalls.push({kind: 'post', url, data, onSuccess, onFailure, request});
-            if (options.syncReply) {
-                request.reply(...options.syncReply);
-            }
+            request.setRequestHeader = () => {};
+            request.send = data => {
+                ioCalls.push({kind: method.toLowerCase(), url, data: data, onSuccess, onFailure, request});
+                if (options.syncReply) request.reply(...options.syncReply);
+            };
             return request;
         }
     };
@@ -238,6 +235,7 @@ function fixture(options = {}) {
     const unmarked = options.unmarked ? element('form') : null;
     if (unmarked) {
         unmarked.setAttribute('action', '/feedback');
+        unmarked.valid=true;unmarked.checkValidity=function(){return this.valid;};
         unmarked.parentElement = target;
         target.children = [form, unmarked];
     }
@@ -277,7 +275,8 @@ function fixture(options = {}) {
 
     const document = {
         children: [page],
-        baseURI: options.baseURI,
+        contains(node) { return page.contains(node); },
+        baseURI: options.baseURI || 'https://example.test/page',
         // The document's encoding, which applies when no accept-charset
         // label is recognised.
         characterSet: options.characterSet === undefined ? 'UTF-8' : options.characterSet,
@@ -328,6 +327,10 @@ function fixture(options = {}) {
         TextDecoder: options.noTextDecoder ? undefined : TextDecoder,
         location: {href: 'https://example.test/page', origin: 'https://example.test'},
         HTMLFormElement: {prototype: {
+            checkValidity: options.noNativeValidity ? undefined : function () {
+                this.nativeValidityChecks = (this.nativeValidityChecks || 0) + 1;
+                return this.valid !== false;
+            },
             requestSubmit(submitter) {
                 // The module invokes this with .call($form), so `this` is the form.
                 if (options.throwingRequestSubmit) {
@@ -364,13 +367,13 @@ function fixture(options = {}) {
     }
 
     const exports = {};
-    vm.runInNewContext(readModuleSource('paste/ui/form.js'), {
+    vm.runInNewContext(readModuleSource('paste/ui/form/form_html.js'), {
         window, document, Array, console,
         paste: {define(name, deps, factory) {
-            assert.equal(name, 'paste.ui.form');
-            assert.equal(deps.length, 2);
-            assert.equal(deps[0], 'paste.io');
-            assert.equal(deps[1], 'paste.event');
+            assert.equal(name, 'paste.ui.form.form_html');
+            assert.equal(deps.length, 4);
+            assert.equal(deps[0], 'paste.event');
+            assert.equal(deps[3], 'paste.ui.utilities.io-html-fragment');
             // A Subscription attaches through the element's own listener
             // registration — the same binding addEventListener would make.
             const event = {Event: {Subscription: function (type, el, fn) {
@@ -379,7 +382,19 @@ function fixture(options = {}) {
                 this.detach = () => el.removeEventListener(type, fn);
                 this.dispose = () => el.removeEventListener(type, fn);
             }}};
-            factory(exports, io, event);
+            event.bind=(type,el,fn,context)=>el.addEventListener(type,fn.bind(context));
+            const validity = {};
+            const formDom = require('./fakes.cjs').loadFormDom(window);
+            vm.runInNewContext(readModuleSource('paste/ui/form/form_validity.js'), {
+                window, document, paste: {define(name, deps, make) {
+                    make(validity, {Guid:{create:()=> 'legacy-form-id'}}, formDom);
+                }}
+            });
+            const fragment = {};
+            vm.runInNewContext(readModuleSource('paste/ui/utilities/io-html-fragment.js'), {
+                window: require('./fakes.cjs').fragmentDomWindow(window), document, paste: {define(name, deps, make) { make(fragment, io); }}
+            });
+            factory(exports, event, validity, formDom, fragment);
         }}
     });
     // The module probes FormData's submitter argument during evaluation;
@@ -404,6 +419,46 @@ function submit(f, submitter) {
     }
     return event;
 }
+
+test('the busy class marks only the pending reply target and clears on settlement', () => {
+    const settle = {
+        success: f => f.ioCalls[0].request.reply(200, 'text/html', '<p>Received</p>'),
+        serverValidation: f => f.ioCalls[0].request.reply(422, 'text/html', '<p>Invalid</p>'),
+        unusableReply: f => f.ioCalls[0].request.reply(200, 'application/json', '{}'),
+        error: f => f.ioCalls[0].request.onerror(),
+        abort: f => f.ioCalls[0].request.onabort(),
+        timeout: f => f.ioCalls[0].request.ontimeout(),
+        deadline: f => f.ioCalls[0].request.ontimeout()
+    };
+    for (const [reason, finish] of Object.entries(settle)) {
+        const f = fixture();
+        f.target.className = 'receipt wide';
+        f.form.className = 'paste-ui-form';
+        assert.equal(f.target.classList.contains('paste-ui-formhtml-busy'), false, reason);
+        submit(f);
+        assert.equal(f.target.classList.contains('paste-ui-formhtml-busy'), true, reason);
+        assert.equal(f.target.getAttribute('aria-busy'), 'true', reason);
+        assert.equal(f.form.className, 'paste-ui-form', reason);
+        assert.equal(f.target.classList.contains('receipt'), true, reason);
+        assert.equal(f.target.classList.contains('wide'), true, reason);
+        finish(f);
+        assert.equal(f.target.hasAttribute('aria-busy'), false, reason);
+        assert.equal(f.target.className, 'receipt wide', reason);
+    }
+});
+
+test('preparation failures and synchronous replies never retain the busy class', () => {
+    for (const options of [{nullRequest: true}, {formDataThrowsOnSubmit: true}, {ioThrows: true},
+        {syncReply: [200, 'text/html', '<p>Received</p>']}, {syncReply: [500, 'application/json', '{}']}]) {
+        const f = fixture(options);
+        let adds = 0;
+        const add = f.target.classList.add.bind(f.target.classList);
+        f.target.classList.add = token => { adds++; add(token); };
+        submit(f);
+
+        assert.equal(f.target.classList.contains('paste-ui-formhtml-busy'), false);
+    }
+});
 
 test('urlencoded post sends a query-string body including the submitter', () => {
     const f = fixture();
@@ -705,7 +760,7 @@ test('a browser without XMLHttpRequest.prototype.responseURL leaves the submit a
 test('an HTML response from a cross-origin final URL is not placed and not replayed', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event); });
     // A real innerHTML write here would detach the form — build the DOM it
     // claimed to represent instead: existing content beside the form and a
     // control inside it, so the assertions name real node identity.
@@ -725,7 +780,7 @@ test('an HTML response from a cross-origin final URL is not placed and not repla
     assert.equal(failures.length, 1);
     assert.equal(failures[0].detail.reason, 'response');
     assert.equal(f.target.hasAttribute('aria-busy'), false);
-    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 1);
+    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 1);
 });
 
 test('an HTML response with an empty responseURL fails as unplaceable', () => {
@@ -734,7 +789,7 @@ test('an HTML response with an empty responseURL fails as unplaceable', () => {
     f.ioCalls[0].request.reply(200, 'text/html', '<p>other</p>', '');
     assert.equal(f.target.innerHTML, '');
     assert.equal(f.form.submitted, undefined);
-    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 1);
+    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 1);
 });
 
 test('an HTML response redirected within the page origin is placed normally', () => {
@@ -748,7 +803,7 @@ test('an HTML response redirected within the page origin is placed normally', ()
 test('a 200 application/json response produces one POST and no replay', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event); });
     submit(f, {name: 'go', value: 'Send'});
     f.ioCalls[0].request.reply(200, 'application/json', '{}');
     // One transmitted POST, zero native replays — the response path obeys
@@ -760,7 +815,7 @@ test('a 200 application/json response produces one POST and no replay', () => {
     assert.equal(failures[0].detail.reason, 'response');
     // The default feedback lands inside the form, focused, and entered
     // values stay untouched.
-    const notice = f.form.children.find(c => c.className === 'paste-ui-form-failure');
+    const notice = f.form.children.find(c => c.className === 'paste-ui-formhtml-failure');
     assert.ok(notice);
     assert.equal(notice.getAttribute('role'), 'alert');
     assert.equal(notice.getAttribute('tabindex'), '-1');
@@ -775,7 +830,7 @@ test('a 200 application/json response produces one POST and no replay', () => {
 test('an uncertain post failure releases the form and shows the default notice', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event); });
     submit(f);
     const request = f.ioCalls[0].request;
     request.onerror();
@@ -790,7 +845,7 @@ test('an uncertain post failure releases the form and shows the default notice',
     assert.equal(f.target.hasAttribute('aria-busy'), false);
     assert.equal(failures.length, 1);
     assert.equal(failures[0].detail.reason, 'error');
-    const notice = f.form.children.find(c => c.className === 'paste-ui-form-failure');
+    const notice = f.form.children.find(c => c.className === 'paste-ui-formhtml-failure');
     assert.ok(notice, 'an unhandled POST failure must surface a visible notice');
     assert.equal(notice.getAttribute('role'), 'alert');
     assert.equal(notice.focused, true);
@@ -803,7 +858,7 @@ test('an uncertain post failure releases the form and shows the default notice',
 test('a status-0 readystatechange settles nothing — the terminal event names the cause', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event); });
     submit(f);
     const call = f.ioCalls[0];
     // paste.io's callback fires from readystatechange(4, 0) BEFORE the
@@ -823,7 +878,7 @@ test('a status-0 readystatechange settles nothing — the terminal event names t
 test('a status-0 reply followed by error names the transport failure', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event); });
     submit(f);
     const call = f.ioCalls[0];
     call.onFailure('', 0, call.request);
@@ -839,6 +894,7 @@ test('an idempotent-declared form resubmits natively on an uncertain failure', (
     const submitter = {name: 'go', value: 'Send'};
     submit(f, submitter);
     f.ioCalls[0].request.onerror();
+    fireDelayed(f, 0);
     assert.equal(f.form.submitted, 1);
     assert.equal(f.form.lastSubmitter, submitter);
     assert.equal(f.target.hasAttribute('aria-busy'), false);
@@ -857,17 +913,17 @@ test('a canceled failure event owns the failure — busy already cleared inside 
     const f = fixture();
     f.form.setAttribute('data-paste-form-idempotent', '');
     const observed = [];
-    f.form.addEventListener('paste.ui.form:failed', event => {
+    f.form.addEventListener('paste.ui.formhtml:failed', event => {
         // Busy state clears before dispatch — a listener may start a new
         // submission without meeting the in-flight guard.
-        observed.push(f.target.hasAttribute('aria-busy'));
+        observed.push([f.target.hasAttribute('aria-busy'), f.target.classList.contains('paste-ui-formhtml-busy')]);
         event.preventDefault();
     });
     submit(f);
     f.ioCalls[0].request.ontimeout();
-    assert.deepEqual(observed, [false]);
+    assert.deepEqual(observed, [[false, false]]);
     assert.equal(f.form.submitted, undefined);
-    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 0,
+    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 0,
         'a handled failure gets no default notice');
     const next = submit(f);
     assert.equal(next.prevented, 1);
@@ -877,7 +933,7 @@ test('a canceled failure event owns the failure — busy already cleared inside 
 test('late events from a settled request leave a newer submission alone', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event); });
     submit(f);
     const first = f.ioCalls[0].request;
     first.onerror();
@@ -889,9 +945,10 @@ test('late events from a settled request leave a newer submission alone', () => 
     // A trailing event on the old request must not notify again or strip
     // the newer request's busy state.
     first.onabort();
-    first.onload();
+    first.reply(200, 'text/html', '<p>Late</p>');
     assert.equal(failures.length, 1);
     assert.equal(f.target.getAttribute('aria-busy'), 'true');
+    assert.equal(f.target.classList.contains('paste-ui-formhtml-busy'), true);
 });
 
 test('repeated failures keep exactly one module-created notice', () => {
@@ -911,7 +968,7 @@ test('repeated failures keep exactly one module-created notice', () => {
     f.ioCalls[0].request.onerror();
     submit(f);
     f.ioCalls[1].request.ontimeout();
-    const notices = f.form.children.filter(c => c.className === 'paste-ui-form-failure');
+    const notices = f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure');
     assert.equal(notices.length, 1);
     assert.equal(notices[0].detail, undefined);
     assert.equal(f.ioCalls.length, 2);
@@ -926,14 +983,13 @@ test('repeated failures keep exactly one module-created notice', () => {
 });
 
 test('the background request timeout only honors decimal digits in the XHR range', () => {
-    // The deadline runs on the module's timer; a declared value past the
-    // longest delay a host timer holds runs at that limit.
+    // The shared operation assigns the native XHR timeout before transmission.
     const cases = [
         [undefined, 30000], ['', 30000], [' ', 30000], ['later', 30000],
         ['-1', 30000], ['0.5', 30000], ['1.5', 30000], ['1e3', 30000],
         ['0x10', 30000], ['4294967296', 30000],
-        ['0', null], ['1', 1], ['45000', 45000], ['2147483647', 2147483647],
-        ['2147483648', 2147483647], ['4294967295', 2147483647]
+        ['0', 0], ['1', 1], ['45000', 45000], ['2147483647', 2147483647],
+        ['2147483648', 2147483648], ['4294967295', 4294967295]
     ];
     cases.forEach(([value, expected]) => {
         const f = fixture();
@@ -941,44 +997,14 @@ test('the background request timeout only honors decimal digits in the XHR range
             f.form.setAttribute('data-paste-form-timeout', value);
         }
         submit(f);
-        const armed = Array.from(f.timers.values());
-        assert.deepEqual(armed.map(timer => timer.delay), expected === null ? [] : [expected],
-            'data-paste-form-timeout=' + JSON.stringify(value));
-        // No XHR timeout is assigned after send — an engine may ignore it.
-        assert.equal(f.ioCalls[0].request.timeout, undefined);
+        assert.equal(f.ioCalls[0].request.timeout, expected);
+        assert.equal(f.timers.size, 0);
     });
 });
 
-test('a load with no answer is the error its skipped callback never delivered', () => {
-    const f = fixture();
-    const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event); });
-    submit(f);
-    const request = f.ioCalls[0].request;
-    // Old paste.io threw inside readystatechange on a status-0 reply —
-    // load fires with no callback ever having run.
-    request.onload();
-    request.onload();
-    assert.equal(failures.length, 1);
-    assert.equal(failures[0].detail.reason, 'error');
-    assert.equal(f.ioCalls.length, 1);
-    assert.equal(f.target.hasAttribute('aria-busy'), false);
-});
 
-test('a completed response on load is classified by the normal response path', () => {
-    const f = fixture();
-    submit(f);
-    const request = f.ioCalls[0].request;
-    // Old paste.io threw before calling either callback; the load event
-    // then presents the completed response through respond once.
-    request.responseText = '<p>recovered</p>';
-    request.status = 200;
-    request.getResponseHeader = () => 'text/html';
-    request.onload();
-    assert.equal(f.target.innerHTML, '<p>recovered</p>');
-    request.onload();
-    assert.equal(f.target.innerHTML, '<p>recovered</p>');
-});
+
+
 
 test('a request paste.io could not start is left to submit natively, never busy', () => {
     const f = fixture({nullRequest: true});
@@ -1052,21 +1078,12 @@ test('host constructors are captured once, at define time', () => {
 
 test('form source walks FormData without a callback', () => {
     const source = require('fs').readFileSync(
-        require('path').join(__dirname, '../modules/form/form.js'), 'utf8');
+        require('path').join(__dirname, '../modules/form/form_html/form_html.js'), 'utf8');
     assert.equal(/\.forEach\s*\(/.test(source), false, 'forEach remains in form.js');
     assert.equal(/\bwindow\s*\./.test(source), false, 'a global is read live through window');
 });
 
-test('load after a placed HTML reply does nothing', () => {
-    const f = fixture();
-    submit(f);
-    const request = f.ioCalls[0].request;
-    request.reply(200, 'text/html; charset=utf-8', '<p>ok</p>');
-    request.onload();
-    assert.equal(f.target.innerHTML, '<p>ok</p>');
-    assert.ok(!f.form.submitted);
-    assert.ok(!f.form.prototypeSubmitted);
-});
+
 
 test('prototype submit is used when requestSubmit is unavailable', () => {
     const f = fixture({noRequestSubmit: true});
@@ -1075,6 +1092,7 @@ test('prototype submit is used when requestSubmit is unavailable', () => {
     // A replay-declared form on a transport failure resubmits natively —
     // through the prototype when requestSubmit is absent.
     f.ioCalls[0].request.onerror();
+    fireDelayed(f, 0);
     assert.equal(f.form.prototypeSubmitted, 1);
     assert.equal(f.target.hasAttribute('aria-busy'), false);
 });
@@ -1088,6 +1106,7 @@ test('a control named requestSubmit shadowing the method still resubmits nativel
     f.form.setAttribute('data-paste-form-idempotent', '');
     submit(f, submitter);
     f.ioCalls[0].request.onerror();
+    fireDelayed(f, 0);
     assert.equal(f.form.submitted, 1);
     assert.equal(f.form.lastSubmitter, submitter);
     assert.equal(f.target.hasAttribute('aria-busy'), false);
@@ -1098,6 +1117,7 @@ test('a throwing requestSubmit falls back to prototype submit exactly once', () 
     f.form.setAttribute('data-paste-form-idempotent', '');
     submit(f);
     f.ioCalls[0].request.onerror();
+    fireDelayed(f, 0);
     assert.equal(f.form.prototypeSubmitted, 1);
     assert.equal(f.target.hasAttribute('aria-busy'), false);
     // The bypass flag was reset: a later submit is intercepted normally.
@@ -1118,15 +1138,22 @@ test('the module publishes no API', () => {
     assert.equal(Object.keys(f.exports).length, 0);
 });
 
-test('markup without data-paste-form is not enhanced', () => {
+test('ordinary forms regain validation without background submission', () => {
     const f = fixture({unmarked: true});
-    assert.equal(f.unmarked.listeners.submit, undefined);
+    assert.notEqual(f.unmarked.noValidate,true);
+    assert.equal(f.unmarked.id,'legacy-form-id');
+    assert.equal(f.unmarked.getAttribute('data-validity-valid'),'true');
+    let prevented=0;const event={preventDefault(){prevented++;}};
+    f.unmarked.listeners.submit(event);assert.equal(prevented,0);
+    f.unmarked.valid=false;f.unmarked.listeners.submit(event);assert.equal(prevented,1);
+    f.unmarked.valid=true;f.unmarked.setAttribute('data-not-allowed','true');
+    f.unmarked.listeners.submit(event);assert.equal(prevented,2);assert.equal(f.ioCalls.length,0);
     // Nor when it arrives inside swapped IO reply fragment markup.
     const injected = f.element('form');
     f.target.parsed = [injected];
     submit(f);
     f.ioCalls[0].request.reply(200, 'text/html', '<form></form>');
-    assert.equal(injected.listeners.submit, undefined);
+    assert.equal(typeof injected.listeners.submit, 'function');
 });
 
 test('browsers without WeakMap are left alone', () => {
@@ -1156,7 +1183,7 @@ test('a form is enhanced only once even when a swapped IO reply fragment contain
 
 test('the source captures builtins instead of re-walking them per call', () => {
     const source = require('fs').readFileSync(
-        require('path').join(__dirname, '../modules/form/form.js'), 'utf8');
+        require('path').join(__dirname, '../modules/form/form_html/form_html.js'), 'utf8');
     assert.ok(!(/Object\.prototype\.hasOwnProperty\.call/).test(source),
         'a builtin is re-walked per call instead of captured once');
 });
@@ -1180,7 +1207,7 @@ test('a get that fails synchronously lets its own native submit proceed', () => 
     const f = fixture({syncReply: [500, 'application/json', '{}']});
     f.form.setAttribute('method', 'get');
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => failures.push(event.detail.reason));
+    f.form.addEventListener('paste.ui.formhtml:failed', event => failures.push(event.detail.reason));
     const event = submit(f);
     assert.deepEqual(failures, ['response']);
     assert.equal(event.prevented, 0, 'the native submit was canceled after a failure asked for replay');
@@ -1193,7 +1220,7 @@ test('a post that fails synchronously keeps the submit and shows the notice', ()
     const event = submit(f);
     assert.equal(event.prevented, 1, 'a transmitted post was left to submit again natively');
     assert.equal(f.form.submitted, undefined);
-    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 1);
+    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 1);
 });
 
 test('a client that answers synchronously leaves the target free for the next submit', () => {
@@ -1210,29 +1237,27 @@ test('a retry clears the prior failure notice while its new request is pending',
     const f = fixture();
     submit(f);
     f.ioCalls[0].request.onerror();
-    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 1);
+    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 1);
     submit(f);
     assert.equal(f.ioCalls.length, 2);
     assert.equal(f.target.getAttribute('aria-busy'), 'true');
-    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 0,
+    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 0,
         'an earlier error must not describe the pending attempt');
 });
 
-test('an expired deadline aborts the request on the module timer and reports a timeout', () => {
+test('the native deadline reports one timeout and releases the request', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event.detail.reason); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event.detail.reason); });
     f.form.setAttribute('data-paste-form-timeout', '500');
     submit(f);
     const request = f.ioCalls[0].request;
     assert.equal(f.target.getAttribute('aria-busy'), 'true');
-    f.fireTimers();
-    // The abort the deadline caused is a timeout, never an abort, and is
-    // reported once although the request dispatched its abort event.
-    assert.equal(request.aborted, 1);
+    request.ontimeout();
+    request.ontimeout();
     assert.deepEqual(failures, ['timeout']);
     assert.equal(f.target.hasAttribute('aria-busy'), false);
-    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 1);
+    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 1);
     assert.equal(f.windowListenerCount(), 0, 'the unload watch ends with the request');
     const next = submit(f);
     assert.equal(next.prevented, 1, 'an expired submit no longer swallows the next one');
@@ -1243,22 +1268,12 @@ test('an expired get deadline keeps the documented native replay', () => {
     const f = fixture();
     f.form.setAttribute('method', 'get');
     submit(f);
-    f.fireTimers();
+    f.ioCalls[0].request.ontimeout();
     assert.equal(f.form.submitted, 1);
     assert.equal(f.ioCalls.length, 1);
 });
 
-test('a deadline whose abort throws or dispatches nothing still settles as a timeout', () => {
-    [{abortThrows: true}, {abortDispatchesNothing: true}].forEach(options => {
-        const f = fixture(options);
-        const failures = [];
-        f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event.detail.reason); });
-        submit(f);
-        f.fireTimers();
-        assert.deepEqual(failures, ['timeout'], JSON.stringify(options));
-        assert.equal(f.target.hasAttribute('aria-busy'), false);
-    });
-});
+
 
 test('every settle path clears the deadline and the unload watch', () => {
     const settle = {
@@ -1274,7 +1289,7 @@ test('every settle path clears the deadline and the unload watch', () => {
         submit(f);
         const request = f.ioCalls[0].request;
         request.leave = () => f.dispatchWindow('beforeunload');
-        assert.equal(f.timers.size, 1);
+        assert.equal(f.timers.size, 0);
         assert.equal(f.windowListenerCount(), 2);
         settle[path](request);
         assert.equal(f.timers.size, 0, path + ' left its deadline armed');
@@ -1288,7 +1303,7 @@ test('an abort once the page began unloading never replays over the navigation',
         [['post', true], ['get', false], ['post', false]].forEach(([method, idempotent]) => {
             const f = fixture();
             const failures = [];
-            f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event.detail.reason); });
+            f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event.detail.reason); });
             f.form.setAttribute('method', method);
             if (idempotent) {
                 f.form.setAttribute('data-paste-form-idempotent', '');
@@ -1302,7 +1317,7 @@ test('an abort once the page began unloading never replays over the navigation',
             assert.equal(f.form.prototypeSubmitted, undefined, label);
             // The notice stands in for the replay: invisible on a page being
             // left, the honest outcome on one that stays.
-            assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 1, label);
+            assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 1, label);
             assert.equal(f.target.hasAttribute('aria-busy'), false, label);
             // A trailing terminal event stays inert.
             f.ioCalls[0].request.onerror();
@@ -1314,21 +1329,22 @@ test('an abort once the page began unloading never replays over the navigation',
 test('a handled abort while unloading leaves the failure UX to its listener', () => {
     const f = fixture();
     f.form.setAttribute('method', 'get');
-    f.form.addEventListener('paste.ui.form:failed', event => { event.preventDefault(); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { event.preventDefault(); });
     submit(f);
     f.dispatchWindow('beforeunload');
     f.ioCalls[0].request.onabort();
     assert.equal(f.form.submitted, undefined);
-    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 0);
+    assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 0);
 });
 
 test('an abort while the page stays still fails as an abort with its replay rule', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event.detail.reason); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event.detail.reason); });
     f.form.setAttribute('method', 'get');
     submit(f);
     f.ioCalls[0].request.onabort();
+    fireDelayed(f, 0);
     assert.deepEqual(failures, ['abort']);
     assert.equal(f.form.submitted, 1);
 });
@@ -1336,7 +1352,7 @@ test('an abort while the page stays still fails as an abort with its replay rule
 test('a transport error after beforeunload still takes the failure path', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event.detail.reason); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event.detail.reason); });
     submit(f);
     f.dispatchWindow('beforeunload');
     f.ioCalls[0].request.onerror();
@@ -1346,11 +1362,11 @@ test('a transport error after beforeunload still takes the failure path', () => 
 test('a deadline that expires after beforeunload is still a timeout', () => {
     const f = fixture();
     const failures = [];
-    f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event.detail.reason); });
+    f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event.detail.reason); });
     f.form.setAttribute('data-paste-form-idempotent', '');
     submit(f);
     f.dispatchWindow('beforeunload');
-    f.fireTimers();
+    f.ioCalls[0].request.ontimeout();
     assert.deepEqual(failures, ['timeout']);
     assert.equal(f.form.submitted, 1);
 });
@@ -1361,10 +1377,12 @@ test('an unload seen by one request does not hold back the next one\'s replay', 
     submit(f);
     f.dispatchWindow('beforeunload');
     f.ioCalls[0].request.onabort();
+    fireDelayed(f, 0);
     assert.equal(f.form.submitted, undefined);
     // The visitor stayed — another listener held the page — and submits again.
     submit(f);
     f.ioCalls[1].request.onabort();
+    fireDelayed(f, 0);
     assert.equal(f.form.submitted, 1);
 });
 
@@ -1375,7 +1393,7 @@ test('a transport error once the page began unloading never replays over the nav
         [['post', true], ['get', false]].forEach(([method, idempotent]) => {
             const f = fixture();
             const failures = [];
-            f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event.detail.reason); });
+            f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event.detail.reason); });
             f.form.setAttribute('method', method);
             if (idempotent) {
                 f.form.setAttribute('data-paste-form-idempotent', '');
@@ -1387,7 +1405,7 @@ test('a transport error once the page began unloading never replays over the nav
             assert.deepEqual(failures, ['error'], label);
             assert.equal(f.form.submitted, undefined, label + ' replayed over the navigation');
             assert.equal(f.form.prototypeSubmitted, undefined, label);
-            assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 1, label);
+            assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 1, label);
         });
     });
 });
@@ -1397,6 +1415,7 @@ test('a transport error while the page stays keeps its replay', () => {
     f.form.setAttribute('method', 'get');
     submit(f);
     f.ioCalls[0].request.onerror();
+    fireDelayed(f, 0);
     assert.equal(f.form.submitted, 1);
 });
 
@@ -1415,7 +1434,7 @@ test('a beforeunload the visitor stayed through stops counting once the grace ru
             const f = fixture();
             const failures = [];
             const label = method + ' ' + reason;
-            f.form.addEventListener('paste.ui.form:failed', event => { failures.push(event.detail.reason); });
+            f.form.addEventListener('paste.ui.formhtml:failed', event => { failures.push(event.detail.reason); });
             f.form.setAttribute('method', method);
             if (idempotent) {
                 f.form.setAttribute('data-paste-form-idempotent', '');
@@ -1429,9 +1448,10 @@ test('a beforeunload the visitor stayed through stops counting once the grace ru
             // The visitor stayed; a later stop or network failure is not
             // the navigation's.
             f.ioCalls[0].request['on' + reason]();
+            fireDelayed(f, 0);
             assert.deepEqual(failures, [reason], label);
             assert.equal(f.form.submitted, 1, label + ': a failure after the visitor stayed lost its replay');
-            assert.equal(f.form.children.filter(c => c.className === 'paste-ui-form-failure').length, 0, label);
+            assert.equal(f.form.children.filter(c => c.className === 'paste-ui-formhtml-failure').length, 0, label);
             assert.equal(f.timers.size, 0, label + ': a timer outlived the request');
         });
     });
@@ -1491,12 +1511,7 @@ test('a refused timer keeps the background submit and only loses the deadline', 
     assert.equal(f.target.hasAttribute('aria-busy'), false);
 });
 
-test('the deadline timer is captured at define time', () => {
-    const f = fixture();
-    f.window.setTimeout = () => { throw new Error('re-read setTimeout'); };
-    submit(f);
-    assert.equal(f.timers.size, 1);
-});
+
 
 function submitForm(f, form, submitter) {
     const event = f.submitEvent(submitter);
@@ -1531,7 +1546,7 @@ test('a target freed by its owner takes the next form\'s submit, and busy lasts 
     // The first form's request is settled: its trailing events neither
     // release the target nor reach the new owner.
     f.ioCalls[0].request.onabort();
-    f.ioCalls[0].request.onload();
+    f.ioCalls[0].request.reply(200, 'text/html', '<p>Late</p>');
     assert.equal(f.target.getAttribute('aria-busy'), 'true');
     assert.equal(submit(f).prevented, 1);
     assert.equal(f.ioCalls.length, 2, 'the first form waits for the new owner too');
@@ -1543,8 +1558,9 @@ test('a target freed by its owner takes the next form\'s submit, and busy lasts 
 test('a failure listener may submit another form into the target it just released', () => {
     const f = fixture({secondForm: true});
     let started = null;
-    f.form.addEventListener('paste.ui.form:failed', event => {
+    f.form.addEventListener('paste.ui.formhtml:failed', event => {
         event.preventDefault();
+        assert.equal(f.target.classList.contains('paste-ui-formhtml-busy'), false);
         started = submitForm(f, f.second);
     });
     submit(f);
@@ -1552,6 +1568,7 @@ test('a failure listener may submit another form into the target it just release
     assert.equal(started.prevented, 1);
     assert.equal(f.ioCalls.length, 2);
     assert.equal(f.target.getAttribute('aria-busy'), 'true');
+    assert.equal(f.target.classList.contains('paste-ui-formhtml-busy'), true);
 });
 
 test('nested targets have one owner: neither the inner nor the outer form submits while the other is pending', () => {
@@ -1649,4 +1666,172 @@ test('the text decoder is captured at define time', () => {
     f.form.setAttribute('accept-charset', 'ISO-8859-1');
     f.window.TextDecoder = function () { return {encoding: 'utf-8'}; };
     assert.equal(submit(f).prevented, 0);
+});
+
+
+test('an empty declaration scan does not construct capability-probe markup or FormData', () => {
+    let creates = 0;
+    let constructs = 0;
+    vm.runInNewContext(readModuleSource('paste/ui/form/form_html.js'), {
+        paste: {define(name, deps, build) { build({}, {Event: {Subscription() {}}}, {}, require('./fakes.cjs').loadFormDom({}), {}); }},
+        window: {FormData: function () { constructs++; }},
+        document: {querySelectorAll() { return []; }, createElement() { creates++; }}
+    });
+    assert.equal(creates, 0);
+    assert.equal(constructs, 0);
+});
+
+test('a refused HTML assignment releases the target without replaying a post', () => {
+    const f = fixture();
+    const failures = [];
+    f.form.addEventListener('paste.ui.formhtml:failed', event => failures.push(event.detail.reason));
+    f.target.refuseHTML = true;
+    submit(f);
+    f.ioCalls[0].request.reply(200, 'text/html', '<p>Received</p>');
+    assert.deepEqual(failures, ['response']);
+    assert.equal(f.target.hasAttribute('aria-busy'), false);
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.windowListenerCount('beforeunload'), 0);
+    assert.equal(f.windowListenerCount('pagehide'), 0);
+    assert.equal(f.form.submitted, undefined);
+    assert.equal(f.ioCalls.length, 1);
+    submit(f);
+    assert.equal(f.ioCalls.length, 2, 'the completed owner blocked a later explicit submission');
+});
+
+test('a refusal after HTML placement releases the target and never replays the response', () => {
+    const f = fixture();
+    const status = f.element('p');
+    status.setAttribute('role', 'status');
+    status.focus = () => { throw new Error('focus refused'); };
+    f.target.parsed = [status];
+    submit(f);
+    assert.throws(() => f.ioCalls[0].request.reply(200, 'text/html', '<p role="status">Received</p>'), /focus refused/);
+    assert.equal(f.target.hasAttribute('aria-busy'), false);
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.windowListenerCount('beforeunload'), 0);
+    assert.equal(f.form.submitted, undefined);
+});
+
+for (const missing of ['noFormData', 'noURLSearchParams', 'noURL', 'noResponseURL']) {
+    test('missing ' + missing + ' leaves submission native while validity reflection remains', () => {
+        const f = fixture({[missing]: true});
+        assert.equal(typeof f.form.listeners.submit, 'function');
+        assert.equal(submit(f).prevented, 0);
+        assert.equal(f.ioCalls.length, 0);
+    });
+}
+
+for (const reason of ['error', 'abort']) {
+    test(reason + ' preceding beforeunload cannot replay over navigation', () => {
+        const f = fixture();
+        f.form.setAttribute('method', 'get');
+        submit(f);
+        f.ioCalls[0].request['on' + reason]();
+        assert.equal(f.form.submitted, undefined);
+        assert.equal(f.target.getAttribute('aria-busy'), 'true');
+        f.dispatchWindow('beforeunload');
+        fireDelayed(f, 0);
+        assert.equal(f.form.submitted, undefined);
+        assert.equal(f.target.hasAttribute('aria-busy'), false);
+        assert.equal(f.windowListenerCount(), 0);
+        assert.equal(f.timers.size, 0);
+    });
+}
+
+test('duplicate terminal failures share one deferred decision and release ownership once', () => {
+    const f = fixture();
+    const reasons = [];
+    f.form.setAttribute('method', 'get');
+    f.form.addEventListener('paste.ui.formhtml:failed', e => reasons.push(e.detail.reason));
+    submit(f);
+    f.ioCalls[0].request.onerror();
+    f.ioCalls[0].request.onabort();
+    assert.equal([...f.timers.values()].filter(t => t.delay === 0).length, 1);
+    fireDelayed(f, 0);
+    assert.deepEqual(reasons, ['error']);
+    assert.equal(f.form.submitted, 1);
+    assert.equal(f.timers.size, 0);
+});
+
+
+for (const contentType of ['text/htmlx', 'text/html+xml', 'text/html-not-really']) {
+    test(`an HTML prefix is not an HTML media type: ${contentType}`, () => {
+        const f = fixture(), failures = [];
+        f.form.addEventListener('paste.ui.formhtml:failed', event => failures.push(event.detail.reason));
+        submit(f);
+        f.ioCalls[0].request.reply(200, contentType, '<p>wrong type</p>');
+        assert.notEqual(f.target.innerHTML, '<p>wrong type</p>');
+        assert.deepEqual(failures, ['response']);
+        assert.equal(f.ioCalls.length, 1);
+        assert.equal(f.form.prototypeSubmitted, undefined);
+    });
+}
+
+test('editing an invalid ordinary control does not validate untouched siblings', () => {
+    const f = fixture({unmarked: true}), field = f.element('input');
+    f.unmarked.nativeValidityChecks = 0;
+    f.unmarked.checkValidity = {name: "checkValidity"};
+    field.checkValidity = () => false;
+    f.unmarked.listeners.keyup({target: field});
+    assert.equal(f.unmarked.nativeValidityChecks, 0);
+    field.checkValidity = () => true;
+    f.unmarked.listeners.keyup({target: field});
+    assert.equal(f.unmarked.nativeValidityChecks, 1);
+    assert.equal(field.getAttribute('data-validity-valid'), 'true');
+});
+
+test("ordinary validity leaves forms untouched without the native prototype capability", () => {
+    const f = fixture({unmarked: true, noNativeValidity: true});
+    assert.equal(f.unmarked.listeners.submit, undefined);
+    assert.equal(f.unmarked.getAttribute("data-validity-valid"), null);
+});
+
+
+test('a deferred native replay retains ownership until its decision runs', () => {
+    const f = fixture({secondForm:true});
+    f.form.setAttribute('method','get');
+    submit(f);
+    f.ioCalls[0].request.onerror();
+    const secondEvent = f.submitEvent();
+    f.second.listeners.submit(secondEvent);
+    assert.equal(secondEvent.defaultPrevented,true);
+    assert.equal(f.ioCalls.length,1);
+    fireDelayed(f,0);
+    assert.equal(f.form.submitted,1);
+    assert.equal(f.target.hasAttribute('aria-busy'),false);
+});
+
+
+test('bodyless statuses cannot erase a form target as an empty HTML fragment', () => {
+    for(const status of [204,205,304]) {
+        const f=fixture();
+        const failures=[];
+        f.form.addEventListener('paste.ui.formhtml:failed',e=>failures.push(e.detail.reason));
+        submit(f);
+        f.ioCalls[0].request.reply(status,'text/html','');
+        assert.deepEqual(failures,['response']);
+        assert.equal(f.target.contains(f.form),true);
+        assert.equal(f.form.submitted,undefined);
+    }
+});
+
+
+test('empty form and submitter targets inherit the document base target', () => {
+    for(const submitterOverride of [false,true]) {
+        const f=fixture({baseTarget:'reply'});
+        const button=f.element('button');
+        if(submitterOverride) button.setAttribute('formtarget','');
+        else f.form.setAttribute('target','');
+        const event=submit(f,button);
+        assert.equal(event.defaultPrevented,false);
+        assert.equal(f.ioCalls.length,0);
+    }
+});
+
+
+test('noreferrer form submissions remain native', () => {
+    const f=fixture();f.form.setAttribute('rel','external noreferrer');
+    const event=submit(f);
+    assert.equal(event.defaultPrevented,false);assert.equal(f.ioCalls.length,0);
 });

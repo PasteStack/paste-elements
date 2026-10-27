@@ -145,7 +145,8 @@ function standaloneHost(env) {
         window: env.window,
         document: env.document,
         globals: env.globals,
-        frameDriver: env.frameDriver
+        frameDriver: env.frameDriver,
+        beforeElements: env.beforeElements
     });
     return {stack: stack, host: host, desc: desc};
 }
@@ -2233,31 +2234,6 @@ function hostileWeakMapKeepsTheEnhancement() {
     assert.strictEqual(stack.resizeObservers.length, 0, 'an observer stood without its index');
 }
 
-// An observer delivery whose list length is not a whole count is
-// malformed: it reports nothing and never loops.
-function fractionalEntryCountReportsNothing() {
-    FakeSubscription.reset();
-    const {stack} = standaloneHost();
-    stack.driver.tick(16);
-    const observer = stack.resizeObservers[0];
-    let reads = 0;
-    const entries = new Proxy({length: 1.5}, {get: function (target, key) {
-        if (key === 'length') {
-            return target.length;
-        }
-        reads += 1;
-        if (reads > 100) {
-            throw new Error('runaway delivery loop');
-        }
-        return undefined;
-    }});
-    [entries, {length: -1}, {length: Infinity}, {length: '1'}].forEach(function (list) {
-        assert.doesNotThrow(function () { observer.callback(list, observer); });
-    });
-    assert.strictEqual(reads, 0, 'a malformed list was walked');
-    assert.strictEqual(stack.driver.pending(), 0, 'a malformed list scheduled a pass');
-}
-
 test(malformedDeclarationsReportOncePerHost);
 test(capUsesTheSharedPlainDecimalGrammar);
 test(backgroundHostCarriesNoCorsAttributes);
@@ -2265,7 +2241,6 @@ test(passesNeverWalkTheAncestors);
 test(aForeignPriorityChangeWithdrawsTheClaim);
 test(platformGlobalsAreCapturedOnce);
 test(hostileWeakMapKeepsTheEnhancement);
-test(fractionalEntryCountReportsNothing);
 
 // A MutationObserver double: observe() watches the filtered attribute
 // writes on its target and delivers their records on a microtask, as a
@@ -2957,10 +2932,8 @@ test('a lazy image moved near by layout alone upgrades through proximity', async
     assert.deepStrictEqual(stack.images.map(image => image.src), [url('up-1280.jpg')],
         'a lazy img layout carried near was not admitted');
     assert.deepStrictEqual(observers[0].observed, [], 'an admitted host is still watched');
-    // A delivery naming nothing deferred, or a malformed list, schedules
-    // nothing.
-    observers[0].callback([{target: host}, null]);
-    observers[0].callback({length: 1.5});
+    // A queued report for an already-admitted host schedules nothing.
+    observers[0].callback([{target: host, isIntersecting: true}]);
     assert.strictEqual(stack.driver.pending(), 0);
 });
 
@@ -3675,54 +3648,96 @@ test('a local background on a scroll container follows its scrollable content', 
         'an inline local background lost its origin box');
 });
 
-// A host that refuses the frame makes requestPhased throw. The refused
-// request armed nothing, so the pending mark must not outlive it: the
-// next input asks again and its pass prepares the upgrade.
-function refusingDriver(queueFirst) {
-    const driver = fakes.frameDriver();
-    const requestPhased = driver.requestPhased;
-    driver.refusals = 1;
-    driver.calls = 0;
-    driver.requestPhased = function (read, write) {
-        driver.calls += 1;
-        if (driver.refusals > 0) {
-            driver.refusals -= 1;
-            if (queueFirst) {
-                requestPhased(read, write);
+test('a pending or deferred upgrade does not select another candidate', () => {
+    for (const lazy of [false, true]) {
+        let selections = 0;
+        const {stack} = standaloneHost({
+            elementAttributes: lazy ? {loading: 'lazy'} : {},
+            rect: {top: lazy ? 10000 : 0, bottom: lazy ? 11000 : 1000,
+                left: 0, right: 1000, width: 1000, height: 1000},
+            beforeElements(modules) {
+                const select = modules.imageresolution.selectCandidate;
+                modules.imageresolution.selectCandidate = function () {
+                    selections++;
+                    return select.apply(this, arguments);
+                };
             }
-            throw new Error('frame refused');
-        }
-        return requestPhased(read, write);
-    };
-    return driver;
-}
+        });
+        stack.driver.tick(16);
+        assert.equal(stack.images.length, lazy ? 0 : 1);
+        const admitted = selections;
+        stack.window.fireEvent('resize');
+        stack.driver.tick(32);
+        assert.equal(selections, admitted, 'an ineligible host selected again');
+        if (lazy) assert.equal(selections, 0);
+    }
+});
 
-test('a refused frame request leaves the next input free to ask again', () => {
+test('a base-only descriptor binds no observers, listeners or frame work', () => {
     FakeSubscription.reset();
-    const driver = refusingDriver(false);
-    const {stack} = standaloneHost({
-        rect: {top: 0, bottom: 700, left: 0, right: 1000, width: 1000, height: 700},
-        frameDriver: driver
-    });
-    assert.strictEqual(driver.calls, 1, 'the bind asked for its first pass');
+    const {observers, IntersectionObserver} = fakes.intersectionObserverRegistry();
+    const {stack} = standaloneHost({descriptor: descriptorDocument(640),
+        window: {IntersectionObserver}, elementAttributes: {loading: 'lazy'}});
+    assert.equal(stack.driver.pending(), 0);
+    assert.equal(FakeSubscription.registry.length, 0);
+    assert.equal(observers.length, 0);
+    assert.equal(stack.images.length, 0);
+});
+
+test('an observer-deferred lazy image reads no computed policy or rectangle', () => {
+    FakeSubscription.reset();
+    const {observers, IntersectionObserver} = fakes.intersectionObserverRegistry();
+    const {stack, host} = standaloneHost({window: {IntersectionObserver}, elementAttributes: {loading: 'lazy'}});
+    let rectangles = 0, styles = 0;
+    const rect = host.getBoundingClientRect;
+    host.getBoundingClientRect = function () { rectangles += 1; return rect.call(this); };
+    const style = stack.window.getComputedStyle;
+    stack.window.getComputedStyle = function () { styles += 1; return style.apply(this, arguments); };
+    stack.driver.tick(16);
+    observers[0].trigger([{target: host, isIntersecting: false}]);
     stack.window.fireEvent('resize');
-    assert.strictEqual(driver.calls, 2, 'the input after a refused request did not ask again');
-    driver.tick(16);
-    assert.deepStrictEqual(stack.images.map(image => image.src), [url('up-1280.jpg')],
-        'the pass after a refused request never ran');
+    stack.driver.tick(32);
+    assert.equal(rectangles, 0);
+    assert.equal(styles, 0);
+    assert.equal(stack.images.length, 0);
+    // A foreign source still retires ownership while the image is deferred.
+    host.setAttribute('srcset', 'foreign.jpg 2x');
+    stack.window.fireEvent('resize');
+    stack.driver.tick(48);
+    observers[0].trigger([{target: host, isIntersecting: true}]);
+    stack.driver.tick(64);
+    assert.equal(stack.images.length, 0);
+    assert.equal(host.getAttribute('srcset'), 'foreign.jpg 2x');
 });
 
-// A refusal that still queued its pair: when a frame delivers that pair
-// with no request after it, the pass still runs.
-test('a pair a refused request still queued runs its pass when delivered', () => {
-    FakeSubscription.reset();
-    const driver = refusingDriver(true);
-    const {stack} = standaloneHost({
-        rect: {top: 0, bottom: 700, left: 0, right: 1000, width: 1000, height: 700},
-        frameDriver: driver
+test('a resize delivery for an unwatched box schedules no work', () => {
+    const {stack} = standaloneHost(); stack.driver.tick(16);
+    stack.resizeObservers[0].callback([{target: new Element('div', 'unwatched')}]);
+    assert.equal(stack.driver.pending(), 0);
+});
+
+for (const weak of [WeakMap, undefined, function RefusedWeakMap() { throw new Error('unavailable'); }]) {
+    test('proximity lookup preserves ordering and ignores admitted/unknown hosts: ' + (weak ? weak.name : 'absent'), async () => {
+        FakeSubscription.reset();
+        const {observers, IntersectionObserver} = require('./fakes.cjs').intersectionObserverRegistry();
+        const {stack, host} = standaloneHost({window: {IntersectionObserver, WeakMap: weak},
+            elementAttributes: {loading: 'lazy'},
+            rect: {top: 100, bottom: 800, left: 0, right: 1000, width: 1000, height: 700}});
+        stack.driver.tick(16);
+        const stranger = new Element('img', 'unknown');
+        observers[0].trigger([{target: stranger, isIntersecting: true},
+            {target: host, isIntersecting: true}, {target: host, isIntersecting: false}]);
+        await settlePromises(); stack.driver.tick(32);
+        assert.equal(stack.images.length, 0);
+        observers[0].trigger([{target: host, isIntersecting: true}]);
+        await settlePromises(); stack.driver.tick(48);
+        assert.equal(stack.images.length, 1);
+        stack.images[0].succeed(1280, 1280); await settlePromises();
+        stack.driver.tick(64); stack.driver.tick(80);
+        assert.equal(stack.driver.pending(), 0);
+        observers[0].trigger([{target: host, isIntersecting: true}, {target: stranger, isIntersecting: true}]);
+        await settlePromises();
+        assert.equal(stack.driver.pending(), 0);
+        assert.equal(stack.images.length, 1);
     });
-    driver.tick(16);
-    assert.deepStrictEqual(stack.images.map(image => image.src), [url('up-1280.jpg')],
-        'the queued pass did not run');
-});
-
+}

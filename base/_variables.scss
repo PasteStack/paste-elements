@@ -81,3 +81,6 @@ $breakpoint-desktop: 1024px !default;
 $breakpoint-vertical-small: 650px !default;
 $breakpoint-vertical-medium: 800px !default;
 $breakpoint-vertical-large: 1000px !default;
+
+// Shared UI class namespace; does not emit any selectors.
+$paste-prefix: 'paste-ui' !default;

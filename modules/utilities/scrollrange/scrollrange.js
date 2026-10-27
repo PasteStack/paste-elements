@@ -71,7 +71,8 @@
  * never re-reads it. start and end are the root scroll offsets at which
  * the declared range (before data-scrub-window) is at 0 and at 1 — in
  * container mode 0 and the scrollable span — or null with a null
- * progress. Every call reads afresh and returns its own object.
+ * progress. Every call reads afresh. An optional second argument is a caller-owned
+ * result object to refill; without it the call returns a new object.
  *
  * progressFrom(range, measured) is the progress at the root's current
  * scroll offset for the endpoints an earlier measure of the same range
@@ -526,9 +527,11 @@ paste['define'](
             // moves. An unmeasurable range is inactive, not an error:
             // progress comes back null. 'near' comes out of this same
             // read, not a second probe. The result object is the only
-            // allocation per call: the result is the caller's to keep.
-            measure = function (range) {
-                var resolved = range.resolved,
+            // allocation per call unless the caller supplies a reusable
+            // result. All fields are reset before taking the new sample.
+            measure = function (range, into) {
+                var result = into || {},
+                    resolved = range.resolved,
                     options = range.options,
                     container = options.mode === 'container',
                     taken = sample(resolved.root, container ? null : resolved.subject),
@@ -541,11 +544,16 @@ paste['define'](
                     subjectBottom,
                     start,
                     end;
+                result.progress = null;
+                result.near = false;
+                result.offset = offset;
+                result.start = null;
+                result.end = null;
                 // A root with no rendered viewport carries no visible
                 // span — endpoints anchored to its edges coincide at a
                 // point, and 'near' has no meaning against it.
                 if (!(viewport > 0)) {
-                    return {progress: null, near: false, offset: offset, start: null, end: null};
+                    return result;
                 }
                 if (container) {
                     span = taken.span;
@@ -553,15 +561,14 @@ paste['define'](
                     // root's own scroll is the measurement, so near is
                     // the root's own nearness to the page viewport.
                     if (!(span > 0)) {
-                        return {progress: null, near: rootNear, offset: offset, start: null, end: null};
+                        result.near = rootNear;
+                        return result;
                     }
-                    return {
-                        progress: applyWindow(offset / span, windowBounds),
-                        near: rootNear,
-                        offset: offset,
-                        start: 0,
-                        end: span
-                    };
+                    result.progress = applyWindow(offset / span, windowBounds);
+                    result.near = rootNear;
+                    result.start = 0;
+                    result.end = span;
+                    return result;
                 }
                 // An element root that cannot scroll — no overflow, or
                 // not a scroll container at all — never moves its
@@ -571,7 +578,7 @@ paste['define'](
                 // growing inside it later is what makes it scrollable —
                 // an owner watching resolved.content hears that.
                 if (!taken.scrolls || !taken.rendered) {
-                    return {progress: null, near: false, offset: offset, start: null, end: null};
+                    return result;
                 }
                 subjectTop = (taken.top - taken.rootTop) / taken.rootScale + offset;
                 subjectBottom = (taken.bottom - taken.rootTop) / taken.rootScale + offset;
@@ -580,21 +587,16 @@ paste['define'](
                 end = anchorAt(options.end.subject, subjectTop, subjectBottom) -
                     anchorAt(options.end.viewport, 0, viewport);
                 if (!(end > start)) {
-                    return {progress: null, near: rootNear, offset: offset, start: null, end: null};
+                    result.near = rootNear;
+                    return result;
                 }
-                return {
-                    progress: applyWindow((offset - start) / (end - start), windowBounds),
-                    // The subject is 'near' while it sits within one
-                    // viewport of the visible span — the lead a caller
-                    // spends getting ready before the scene arrives —
-                    // and its root is near the page viewport. Sections
-                    // further out are dormant.
-                    near: rootNear && subjectBottom >= offset - viewport &&
-                        subjectTop <= offset + viewport * 2,
-                    offset: offset,
-                    start: start,
-                    end: end
-                };
+                result.progress = applyWindow((offset - start) / (end - start), windowBounds);
+                // The same sample supplies proximity and progress.
+                result.near = rootNear && subjectBottom >= offset - viewport &&
+                    subjectTop <= offset + viewport * 2;
+                result.start = start;
+                result.end = end;
+                return result;
             },
 
             // The progress at the current offset for located endpoints:

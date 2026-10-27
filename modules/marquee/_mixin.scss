@@ -3,7 +3,7 @@
   $item-height: 5rem,
   $gap: 1rem
 ) {
-  .paste-ui-marquee {
+  & {
     --paste-marquee-item-width: #{$item-width};
     --paste-marquee-item-height: #{$item-height};
     --paste-marquee-gap: #{$gap};
@@ -12,67 +12,78 @@
     --paste-marquee-inline-sign: 1;
     box-sizing: border-box;
     contain: inline-size;
-    display: block;
+    &:where(:not([hidden]), [hidden="until-found" i]) {
+      display: block;
+    }
     inline-size: 100%;
     min-inline-size: 0;
     max-inline-size: 100%;
   }
 
   @supports selector(:dir(rtl)) {
-    .paste-ui-marquee:dir(rtl) {
+    &:dir(rtl) {
       --paste-marquee-inline-sign: -1;
     }
   }
 
-  // Without :dir(), the nearest dir attribute decides.
+  // In older engines the custom property inherits from the nearest
+  // explicit direction, so nested direction changes keep their authority.
   @supports not selector(:dir(rtl)) {
-    [dir="rtl"] .paste-ui-marquee,
-    .paste-ui-marquee[dir="rtl"] {
-      --paste-marquee-inline-sign: -1;
+    @at-root {
+      [dir="rtl"] { --paste-marquee-inline-sign: -1; }
+      [dir="ltr"] { --paste-marquee-inline-sign: 1; }
     }
-
-    [dir="rtl"] [dir="ltr"] .paste-ui-marquee,
-    [dir="rtl"] .paste-ui-marquee[dir="ltr"] {
-      --paste-marquee-inline-sign: 1;
-    }
+    & { --paste-marquee-inline-sign: inherit; }
+    &[dir="rtl"] { --paste-marquee-inline-sign: -1; }
+    &[dir="ltr"] { --paste-marquee-inline-sign: 1; }
   }
 
-  .paste-ui-marquee-items {
-    box-sizing: border-box;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--paste-marquee-gap);
-    inline-size: 100%;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .paste-ui-marquee-item {
-    align-items: center;
-    box-sizing: border-box;
-    display: flex;
-    flex: none;
-    inline-size: min(100%, var(--paste-marquee-item-width));
-    justify-content: center;
-    min-block-size: var(--paste-marquee-item-height);
-    min-inline-size: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .paste-ui-marquee-toggle {
-    font: inherit;
-    margin-block-start: 1rem;
-
-    &[hidden] {
-      display: none;
+  // The caller owns the root; internal roles keep their specificity.
+  @at-root :where(#{&}) {
+    .paste-ui-marquee-items {
+      box-sizing: border-box;
+      &:where(:not([hidden]), [hidden="until-found" i]) {
+        display: flex;
+      }
+      flex-wrap: wrap;
+      gap: var(--paste-marquee-gap);
+      inline-size: 100%;
+      list-style: none;
+      margin: 0;
+      padding: 0;
     }
+
+    .paste-ui-marquee-item {
+      align-items: center;
+      box-sizing: border-box;
+      &:where(:not([hidden]), [hidden="until-found" i]) {
+        display: flex;
+      }
+      flex: none;
+      inline-size: min(100%, var(--paste-marquee-item-width));
+      justify-content: center;
+      min-block-size: var(--paste-marquee-item-height);
+      min-inline-size: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .paste-ui-marquee-toggle {
+      font: inherit;
+      margin-block-start: 1rem;
+
+      &[hidden]:where(:not([hidden="until-found" i])) {
+        display: none;
+      }
+    }
+
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .paste-ui-marquee[data-paste-marquee-state="running"] > .paste-ui-marquee-items {
+    &[data-paste-marquee-state="running"] > .paste-ui-marquee-items {
       block-size: var(--paste-marquee-row-height);
-      display: block;
+      &:where(:not([hidden]), [hidden="until-found" i]) {
+        display: block;
+      }
       overflow: hidden;
       position: relative;
 
@@ -89,10 +100,10 @@
 
   @keyframes paste-ui-marquee {
     from {
-      transform: translate3d(calc(var(--paste-marquee-inline-sign) * (var(--paste-marquee-distance) - var(--paste-marquee-item-size))), 0, 0);
+      transform: translate3d(calc(var(--paste-marquee-inline-sign, 1) * (var(--paste-marquee-distance) - var(--paste-marquee-item-size))), 0, 0);
     }
     to {
-      transform: translate3d(calc(var(--paste-marquee-inline-sign) * (0px - var(--paste-marquee-item-size))), 0, 0);
+      transform: translate3d(calc(var(--paste-marquee-inline-sign, 1) * (0px - var(--paste-marquee-item-size))), 0, 0);
     }
   }
 }

@@ -51,9 +51,11 @@
  *    and writes '--paste-scrub-progress' on the scope element in its
  *    write phase, only when the value actually moved. What the progress
  *    means is the page's own CSS.
- * 4. A degenerate or unmeasurable range removes the property so the
- *    authored default stands. Bind schedules the first pass: the first
- *    frame after bind measures, never waiting for the first scroll.
+ * 4. A degenerate or unmeasurable range restores the authored inline
+ *    value and priority while it still owns the declaration; a newer
+ *    writer is preserved. With no authored value, our declaration is
+ *    removed.
+ *    Bind schedules the first pass without waiting for the first scroll.
  *
  * A subject is measured by its box: one that is itself fixed or sticky
  * keeps the endpoints of its box at the last measure while its root —
@@ -172,9 +174,10 @@
  *                        its end.
  *
  * JavaScript owns exactly one write: the number between 0 and 1 on the
- * scope's '--paste-scrub-progress', removed entirely when the
- * range cannot measure. Everything the value does remains the page's
- * CSS — which descendants read it, the effect they run, the fallback
+ * scope's '--paste-scrub-progress'. When the range cannot measure, the
+ * authored inline value and priority return while our write is still
+ * present; a newer writer is preserved. Everything the value does
+ * remains the page's CSS — which descendants read it, the effect they run, the fallback
  * while the property is absent, and the reduced-motion override.
  * Scrolling itself stays native; the module moves no scroll position
  * and changes no layout.
@@ -219,8 +222,6 @@ paste['define'](
             NativeMutationObserver = $w['MutationObserver'],
             NativeWeakMap = $w['WeakMap'],
             $setTimeout = $w['setTimeout'],
-            $isFinite = isFinite,
-            $floor = Math['floor'],
             $String = String,
             Subscription = event['Event']['Subscription'],
             requestPhased = animation_frame['requestPhased'],
@@ -284,7 +285,7 @@ paste['define'](
                     if (scope.stale) {
                         scope.stale = false;
                         scope.moved = false;
-                        scope.located = measureRange(scope.range);
+                        scope.located = measureRange(scope.range, scope.located);
                         scope.progress = scope.located.progress;
                         scope.pending = true;
                     } else if (scope.moved) {
@@ -301,16 +302,25 @@ paste['define'](
             writeFrame = function () {
                 var index,
                     scope,
-                    progress;
+                    progress,
+                    style;
                 index = scopes.length;
                 while (index--) {
                     scope = scopes[index];
                     if (scope.pending) {
                         scope.pending = false;
                         progress = scope.progress;
+                        style = scope.element.style;
                         if (progress === null) {
                             if (scope.written) {
-                                scope.element.style.removeProperty(property);
+                                if (style.getPropertyValue(property) === $String(scope.last) &&
+                                        style.getPropertyPriority(property) === '') {
+                                    if (scope.authoredValue === '') {
+                                        style.removeProperty(property);
+                                    } else {
+                                        style.setProperty(property, scope.authoredValue, scope.authoredPriority);
+                                    }
+                                }
                                 scope.written = false;
                             }
                             // Withdrawing the property forgets the
@@ -319,31 +329,28 @@ paste['define'](
                             // "unchanged".
                             scope.last = null;
                         } else if (progress !== scope.last) {
+                            if (!scope.written) {
+                                scope.authoredValue = style.getPropertyValue(property);
+                                scope.authoredPriority = style.getPropertyPriority(property);
+                            }
                             scope.last = progress;
                             scope.written = true;
-                            scope.element.style.setProperty(property, $String(progress));
+                            // Clear an important custom property before
+                            // writing: WebKit otherwise retains it.
+                            if (style.getPropertyPriority(property)) {
+                                style.removeProperty(property);
+                            }
+                            style.setProperty(property, $String(progress), '');
                         }
                     }
                 }
             },
 
-            // The pending mark is set before requesting so the pass is
-            // armed once per frame however many inputs arrive before it
-            // runs; requestPhased never runs the pass inside the call
-            // and, by its contract, never throws. Defence in depth: an
-            // animation_frame that throws anyway clears the mark, so the
-            // next input asks again rather than waiting forever on a
-            // frame nothing armed. A pair the failed call still queued
-            // may run beside the next one, and finds no work.
+            // Inputs share one native asynchronous frame.
             schedule = function () {
-                if (framePending) {
-                    return;
-                }
-                framePending = true;
-                try {
+                if (!framePending) {
+                    framePending = true;
                     requestPhased(readFrame, writeFrame);
-                } catch (refused) {
-                    framePending = false;
                 }
             },
 
@@ -369,28 +376,18 @@ paste['define'](
                 schedule();
             },
 
-            // A watched target re-measures exactly the scopes whose geometry
-            // it can move: the scopes whose subject or subject path it
-            // is, and every scope of a
-            // root whose box or content it is. The observer is shared
-            // with the page's other declarations, so an entry that names
-            // no target is skipped on its own — one bad entry never
-            // costs the valid ones — and a list whose length is not a
-            // whole count reports nothing.
+            // Native ResizeObserver entries identify the affected
+            // declarations. A stale entry for an unobserved box is inert.
             observerDelivered = function (entries) {
-                var entryIndex = entries ? entries.length : 0,
-                    entry,
+                var entryIndex = entries.length,
                     entryRecord,
                     entryRoots,
-                    rootIndex;
-                if (typeof entryIndex !== 'number' || !$isFinite(entryIndex) ||
-                        entryIndex < 0 || entryIndex !== $floor(entryIndex)) {
-                    return;
-                }
+                    rootIndex,
+                    dirty = false;
                 while (entryIndex--) {
-                    entry = entries[entryIndex];
-                    entryRecord = entry && entry.target ? observed.get(entry.target) : null;
+                    entryRecord = observed.get(entries[entryIndex].target);
                     if (entryRecord) {
+                        dirty = true;
                         invalidate(entryRecord.scopes);
                         entryRoots = entryRecord.roots;
                         rootIndex = entryRoots.length;
@@ -399,7 +396,9 @@ paste['define'](
                         }
                     }
                 }
-                schedule();
+                if (dirty) {
+                    schedule();
+                }
             },
 
             // A watched box is shared state, not per-scope ownership:
@@ -668,6 +667,8 @@ paste['define'](
                     progress: null,
                     pending: false,
                     written: false,
+                    authoredValue: '',
+                    authoredPriority: '',
                     last: null,
                     path: range.options.mode === 'container' ? [] : pathOf(resolved.subject, resolved.root),
                     pathContent: [],

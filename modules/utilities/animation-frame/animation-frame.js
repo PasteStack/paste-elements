@@ -2,82 +2,25 @@
 /*globals paste */
 
 /**
+ * Batches declared DOM reads before writes on the next browser frame.
+ * request(callback) schedules plain work; requestPhased(read, write)
+ * schedules a pair. Both return an opaque negative id for cancel(id).
+ * An empty request returns 0 and schedules nothing.
+ *
+ * Each batch runs reads, plain callbacks, then writes, preserving
+ * request order within each phase. Work requested during delivery waits
+ * for the next batch. Cancel suppresses any part not yet delivered; a
+ * fully cancelled batch gives its host frame back. Completed callbacks
+ * are released, and the two batch buffers are reused.
+ *
+ * Callbacks receive the browser timestamp unchanged. A missing frame API
+ * uses the original 16 ms timer cadence and performance.now (Date.now when unavailable).
+ * Native frames and timers are asynchronous. Synchronous replacements
+ * are outside this contract; this utility does not repair them or invent
+ * a clock. A thrown callback is reported on a later task so the rest of
+ * the batch can run; a write still runs if its paired read threw.
+ *
  * @module paste/ui/utilities/animation-frame
- *
- * Prevent "layout thrashing" by batching dom work in the next animation
- * frame. The browser should attempt this roughly 60 times per second.
- *
- * Contract:
- * - request(callback) schedules callback for the next frame and returns
- *   an id. Ids are opaque negative integers, so they never collide with
- *   a handle the host's requestAnimationFrame returns: only cancel()
- *   cancels them. A request carrying no callback schedules nothing and
- *   returns 0.
- * - requestPhased(read, write) schedules a measure-then-mutate pair for
- *   the next frame and returns one id for the pair. read runs in the
- *   batch's read phase, write in its write phase.
- * - request() and requestPhased() never run a callback before they
- *   return: every callback runs from a later host frame or task.
- * - Every callback receives one argument, the host frame's timestamp in
- *   milliseconds on the performance.now() clock; a frame delivered
- *   without a finite number, as a page's requestAnimationFrame wrapper
- *   can deliver it, is stamped from performance.now() instead. Every
- *   callback of one batch receives the same timestamp, and each batch's
- *   timestamp is strictly greater than the previous batch's: a frame
- *   time that repeats or rewinds, as a coarsened clock can report it,
- *   is stepped forward by a fraction of a millisecond.
- * - cancel(id) before delivery suppresses the callback; for a phased id
- *   it suppresses whichever of read and write has not run yet. After
- *   delivery, or with an unknown id, it does nothing.
- *
- * Batches and phases:
- * Every request armed for the same frame shares one batch, delivered
- * by one host frame callback. A batch runs in three phases:
- *   1. read   - every phased read, in request order;
- *   2. plain  - every request() callback, in request order;
- *   3. write  - every phased write, in request order.
- * A module that keeps its geometry and computed-style reads in read and
- * its style, class and attribute writes in write never reads after
- * another module has written within the same frame, so the browser
- * computes style and layout once per frame instead of once per module.
- * A write that needs a follow-up read asks for the next frame's read
- * phase rather than reading in place.
- *
- * A request made while a batch runs lands in the next batch. A throwing
- * callback does not stop the rest of its batch; its error is rethrown
- * on a later task. A pair whose read threw still runs its write in the
- * same batch: the write sees whatever state the read left, so a write
- * that depends on its read guards that state itself.
- *
- * Arming:
- * One host animation frame carries each batch; a batch whose every
- * request is cancelled gives its host frame back. While the document
- * is hidden the host delivers no frames, and the batch waits for the
- * first frame after it is shown again. A page that replaced
- * requestAnimationFrame with one that calls back before it returns (a
- * synchronous "flush" helper), or with one that throws, gets that batch
- * on a timer 20 ms later instead: the early callback is ignored and the
- * error is not passed on. Such a wrapper may also have registered a
- * real frame; whichever of that frame and the timer arrives first
- * delivers the batch, and the other then arrives stale and runs
- * nothing, so a batch is delivered once whatever the wrapper does. The
- * timer is a little longer than a frame, so a registered frame usually
- * wins and batches keep to one per frame. The next batch asks
- * requestAnimationFrame again.
- *
- * Example Usage:
- *
- * var requestId = animation_frame['request'](function (time) {
- *     // Execute scripts that require re-paint
- * });
- *
- * animation_frame['cancel'](requestId);
- *
- * var phasedId = animation_frame['requestPhased'](function (time) {
- *     // Read geometry and computed style; keep results in locals
- * }, function (time) {
- *     // Write styles, classes and attributes from those locals
- * });
  */
 
 paste['define'](
@@ -89,29 +32,18 @@ paste['define'](
         var $w = window,
             $setTimeout = setTimeout,
             $clearTimeout = $w['clearTimeout'],
-            $isFinite = isFinite,
-            $raf = $w['requestAnimationFrame']['bind']($w),
-            $caf = $w['cancelAnimationFrame']['bind']($w),
+            $raf = $w['requestAnimationFrame'] || $w['mozRequestAnimationFrame'] ||
+                    $w['webkitRequestAnimationFrame'] || $w['msRequestAnimationFrame'],
+            $caf = $w['cancelAnimationFrame'] || $w['mozCancelAnimationFrame'] ||
+                    $w['webkitCancelAnimationFrame'] || $w['msCancelAnimationFrame'],
             $perf = $w['performance'],
-            $now = $perf['now']['bind']($perf),
-            // The smallest forward step between two batch timestamps:
-            // a power of two, so it survives addition to a large
-            // clock reading.
-            STEP = 1 / 1024,
-            // Whether the queued batch is armed, and its carriers: the
-            // host frame handle (0 when unknown) and the fallback timer
-            // (0 when none). Each arm has a generation; a carrier from
-            // an earlier one is stale and runs nothing.
+            $now = $perf && $perf['now'] ? $perf['now']['bind']($perf) : Date['now'],
+            lastTimer = null,
             armed = false,
-            handle = 0,
-            timer = 0,
+            handle = null,
+            timer = null,
+            // Suppresses a stale carrier when cancellation is unavailable.
             generation = 0,
-            // True while requestAnimationFrame is being asked; early
-            // says it called back inside the call.
-            arming = false,
-            early = false,
-            // The last batch's timestamp.
-            stamped = 0,
             rid = 0,
             // Two reusable batches: one fills while the other runs.
             // Request ids base + 1 .. base + count live in a batch, at
@@ -170,20 +102,13 @@ paste['define'](
             disarm = function () {
                 generation += 1;
                 armed = false;
-                handle = 0;
-                timer = 0;
+                handle = null;
+                timer = null;
             },
 
             deliver = function (time) {
                 var batch = queue;
                 disarm();
-                if (typeof time !== 'number' || !$isFinite(time)) {
-                    time = $now();
-                }
-                if (!(time > stamped)) {
-                    time = stamped + STEP;
-                }
-                stamped = time;
                 // Take the batch before any callback runs: a request made
                 // from inside it belongs to the next batch.
                 queue = running;
@@ -196,43 +121,24 @@ paste['define'](
                 batch.count = 0;
             },
 
-            // One carrier closure per arm: a frame or timer from an
-            // earlier arm compares its generation and runs nothing.
+            // One carrier per batch. A cancelled carrier is inert even
+            // on a platform without cancelAnimationFrame.
             arm = function () {
-                var current = generation + 1;
+                var current = generation + 1,
+                    callback = function (time) {
+                        if (current === generation) {
+                            deliver(time);
+                        }
+                    };
                 generation = current;
                 armed = true;
-                arming = true;
-                early = false;
-                try {
-                    handle = $raf(function (time) {
-                        if (current !== generation) {
-                            return;
-                        }
-                        if (arming) {
-                            early = true;
-                            return;
-                        }
-                        if (timer !== 0) {
-                            $clearTimeout(timer);
-                        }
-                        deliver(time);
-                    });
-                } catch (refused) {
-                    early = true;
-                }
-                arming = false;
-                if (early) {
-                    // A handle from a refusing wrapper is not trusted
-                    // for cancel: it may name another caller's frame.
-                    handle = 0;
+                if ($raf) {
+                    handle = $raf.call($w, callback);
+                } else {
                     timer = $setTimeout(function () {
-                        if (current === generation) {
-                            deliver();
-                        }
-                    }, 20);
-                } else if (!(handle > 0)) {
-                    handle = 0;
+                        lastTimer = $now();
+                        callback(lastTimer);
+                    }, lastTimer === null ? 0 : Math.max(0, 16 - ($now() - lastTimer)));
                 }
             },
 
@@ -311,10 +217,10 @@ paste['define'](
             withdraw(running, -id);
             if (armed && queue.readCount === 0 &&
                     queue.plainCount === 0 && queue.writeCount === 0) {
-                if (handle !== 0) {
-                    $caf(handle);
+                if (handle !== null && $caf) {
+                    $caf.call($w, handle);
                 }
-                if (timer !== 0) {
+                if (timer !== null) {
                     $clearTimeout(timer);
                 }
                 disarm();

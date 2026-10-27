@@ -1,0 +1,5 @@
+@import "mixin";
+
+.paste-ui-apply {
+  @include paste-ui-apply();
+}

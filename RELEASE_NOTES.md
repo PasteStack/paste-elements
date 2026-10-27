@@ -1,5 +1,40 @@
 # paste-elements v0.6.0
 
+## Unreleased: Apply, separate HTML loading and restored Carousel
+
+- `paste.ui.form.form_validity` now owns ordinary native validity reflection and blocking.
+  Load `paste.ui.form.form_apply` for `form.paste-ui-apply` JSON submission, or
+  `paste.ui.form.form_html` for `form.paste-ui-formhtml` HTML replies. The latter
+  also accepts the previous `data-paste-form` declaration during migration.
+  Its busy/failure classes and failure event now belong to `formhtml`.
+  Existing background form consumers must change their module dependency;
+  loading `paste.ui.form.form_validity` alone no longer transports their submissions.
+- Restored the original separate `paste.ui.lazy_loader` APIs. The owning page
+  requests visible content after its own state changes; no automatic observer
+  or scroll listener was added.
+- Restored Carousel's discrete paging, controls, indicators,
+  counter, named instances, events and cycling. Native buttons, pause/reduced
+  motion, accurate variable-width paging and complete disposal fix concrete
+  usability and lifetime gaps. See the matching Surface Carousel contract.
+- Native form-member access no longer fails when a control has a name such as
+  `elements` or `addEventListener`. The shared `form-dom` utility contains that
+  boundary without reserving field names or changing core.
+- Added an application-owned external-library wrapper example that uses core
+  URL dependencies to gate readiness. No extra loader or Surface element.
+
+Historical entries below retain their original release context. They are not
+the current module ownership map.
+
+## Unreleased: restored modules and autosave ownership
+
+Restored the selected enhancements under `paste.ui.*`. Autosave owns its
+request and reply handling. The standalone `paste.ui.io-reply-fragment-envelope`
+client module and its public `apply` API are retired; remove its script/dependency
+when migrating to autosave. Surface's serializer and existing wire format remain
+accepted. Historical entries below describe the earlier release, not the current
+client module inventory.
+
+
 **Date:** 2026-10-22
 
 ## Added
@@ -43,19 +78,19 @@
 
 ## Added
 
-- `paste.ui.form`: `data-paste-form-timeout` sets the intercepted
+- `paste.ui.form.form_validity`: `data-paste-form-timeout` sets the intercepted
   request's deadline in decimal milliseconds (default 30000; the literal
   `0` opts out; malformed values fall back rather than silently
   disabling the deadline), so a stalled request can no longer hold the
   busy state forever.
-- `paste.ui.form`: every outcome after transmission dispatches a
+- `paste.ui.form.form_validity`: every outcome after transmission dispatches a
   bubbling, cancelable `paste.ui.form:failed` event whose
   `detail.reason` is `"error"`, `"timeout"`, `"abort"` or `"response"`;
   a listener calling `preventDefault()` owns the failure UX.
 
 ## Changed
 
-- `paste.ui.form`: without a listener the form resubmits natively only
+- `paste.ui.form.form_validity`: without a listener the form resubmits natively only
   where a replay cannot duplicate the submission — a `get`, or a form
   carrying `data-paste-form-idempotent` — and any other failure appends
   and focuses a `paste-ui-form-failure` `role="alert"` notice preserving
@@ -68,7 +103,7 @@
 
 ## Added
 
-- `paste.ui.form`: a `form[data-paste-form]` inside an IO reply fragment
+- `paste.ui.form.form_validity`: a `form[data-paste-form]` inside an IO reply fragment
   target submits through `paste.io` in the background and the returned markup
   replaces the target's content. The request is the one the browser would have
   sent — the submitting button's `formaction`/`formmethod`/`formenctype`/

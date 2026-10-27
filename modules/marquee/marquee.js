@@ -29,14 +29,14 @@
  * CSS owns every animation frame. The module only measures geometry and
  * eligibility, and it does so after bind and again whenever an input
  * can change the answer: a ResizeObserver notification on the list or
- * an item, a child-list change, focus entering or leaving the list, the
+ * an item, a local content or interactivity-attribute change, focus, the
  * toggle being pressed, and a reduced-motion preference change. The
- * bind-time and observer-driven refreshes — resize and child-list — run
+ * bind-time and observer-driven refreshes run
  * on the next animation frame through
  * paste.ui.utilities.animation-frame: geometry is read in the frame's
  * read phase and the state and custom properties are written in its
  * write phase, so a burst of notifications is one measurement, the
- * measurement shares the frame's single layout with every other paste
+ * measurement shares the frame's read phase with every other paste
  * element, and it never runs inside the observer delivery its own
  * writes would retrigger. Toggle, focus and preference refreshes answer
  * the user immediately.
@@ -72,10 +72,11 @@
  * in, and an unresolvable one keeps the list static.
  *
  * Geometry is read in the list's own layout pixels, the unit every
- * custom property it writes is resolved in: an ancestor transform or
- * zoom scales the item rectangles, so they are divided by the list's
- * rendered width over its layout width. A rendered width within a
- * pixel of offsetWidth, which rounds the layout width, is unscaled. An
+ * custom property it writes is resolved in: horizontal and vertical
+ * scale are measured independently. An axis-aligned ancestor transform
+ * or zoom scales item rectangles; each axis is divided by the list's
+ * rendered size over its layout size. A rendered size within a pixel
+ * of the corresponding rounded offset size is treated as unscaled. An
  * ancestor scale that later changes resizes no box and is not seen
  * until the next refresh input, but each measure is correct at the
  * scale it reads.
@@ -105,8 +106,11 @@ paste['define']('paste.ui.marquee', [
     'use strict';
 
     var $w = window,
+        $style = $w['getComputedStyle'],
         $d = document,
         $abs = Math.abs,
+        $Number = Number,
+        $String = String,
         $parseFloat = parseFloat,
         $isFinite = isFinite,
         Subscription = event['Event']['Subscription'],
@@ -130,14 +134,22 @@ paste['define']('paste.ui.marquee', [
         // Number() would also accept '0x2', '0b1', '1e1', '-0' and
         // padding whitespace.
         DECIMAL = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/,
-        CHILD_LIST = {childList: true},
+        // Changes that can introduce an interactive descendant must
+        // recheck eligibility even when no box changes size. Style is
+        // excluded: our own geometry writes must not observe themselves.
+        CONTENT_CHANGES = {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'href', 'tabindex', 'contenteditable', 'controls']
+        },
 
         durationOf = function (root) {
             var text = root.getAttribute(DURATION_ATTRIBUTE);
             if (text === null) {
                 return DEFAULT_DURATION;
             }
-            return DECIMAL.test(text) ? Number(text) : NaN;
+            return DECIMAL.test(text) ? $Number(text) : NaN;
         },
 
         // An owned custom property: the first write remembers the
@@ -145,15 +157,21 @@ paste['define']('paste.ui.marquee', [
         // records the declaration as the style interface reports it —
         // the ownership proof a later surrender is judged against.
         writeOwned = function (element, record, name, value) {
-            var style = element.style;
+            var style = element.style,
+                current = style.getPropertyValue(name),
+                priority = style.getPropertyPriority(name);
             if (!record.claimed) {
                 record.claimed = true;
-                record.authored = style.getPropertyValue(name);
-                record.authoredPriority = style.getPropertyPriority(name);
+                record.authored = current;
+                record.authoredPriority = priority;
             }
-            if (style.getPropertyValue(name) !== value || style.getPropertyPriority(name)) {
-                style.removeProperty(name);
-                style.setProperty(name, value);
+            if (current !== value || priority) {
+                // WebKit retains an important custom property when
+                // setProperty tries to clear its priority directly.
+                if (priority) {
+                    style.removeProperty(name);
+                }
+                style.setProperty(name, value, '');
             }
             record.written = style.getPropertyValue(name);
             record.writtenPriority = style.getPropertyPriority(name);
@@ -183,8 +201,8 @@ paste['define']('paste.ui.marquee', [
         // of the list's content inline size, 'normal' as 0 — any other
         // form is unresolvable (NaN).
         computedGap = function (list) {
-            var style = $w.getComputedStyle(list),
-                text = String(style.columnGap || ''),
+            var style = $style(list),
+                text = $String(style.columnGap || ''),
                 content;
             if (text === 'normal') {
                 return 0;
@@ -275,12 +293,17 @@ paste['define']('paste.ui.marquee', [
             }
 
             displayState = function (state, canAnimate) {
-                var label;
+                var label,
+                    unavailable = !canAnimate;
                 if (root.getAttribute(STATE_ATTRIBUTE) !== state) {
                     root.setAttribute(STATE_ATTRIBUTE, state);
                 }
-                toggle.hidden = !canAnimate;
-                toggle.disabled = !canAnimate;
+                if (toggle.hidden !== unavailable) {
+                    toggle.hidden = unavailable;
+                }
+                if (toggle.disabled !== unavailable) {
+                    toggle.disabled = unavailable;
+                }
                 label = paused
                     ? root.getAttribute('data-paste-marquee-resume-label')
                     : root.getAttribute('data-paste-marquee-pause-label');
@@ -354,40 +377,61 @@ paste['define']('paste.ui.marquee', [
                     eligible,
                     listWidth,
                     layoutWidth,
+                    layoutHeight,
                     listBox,
-                    scale = 1;
+                    scaleX = 1,
+                    scaleY = 1;
 
                 if (!active) {
                     return null;
                 }
+                if (mediaquery['motionReduced'](motion)) {
+                    return {canAnimate: false};
+                }
+                duration = durationOf(root);
+                if (!$isFinite(duration) || duration <= 0 || list.contains($d.activeElement)) {
+                    return {canAnimate: false};
+                }
                 // The live collection is copied first — a shifting
                 // children list would lie about geometry mid-measure.
                 children = list.children;
-                itemIndex = children.length;
-                while (itemIndex--) {
-                    items[itemIndex] = children[itemIndex];
+                itemsLength = children.length;
+                if (itemsLength < 2) {
+                    return {canAnimate: false};
                 }
-                itemsLength = items.length;
+                itemIndex = itemsLength;
+                while (itemIndex--) {
+                    item = children[itemIndex];
+                    if (!item.matches(ITEM_SELECTOR) || item.matches(INTERACTIVE_SELECTOR) ||
+                            item.querySelector(INTERACTIVE_SELECTOR)) {
+                        return {canAnimate: false};
+                    }
+                    items[itemIndex] = item;
+                }
                 // Rectangles carry any ancestor transform or zoom; the
                 // written geometry is in the list's layout pixels.
                 layoutWidth = list.offsetWidth;
-                if (itemsLength && layoutWidth > 0) {
+                if (layoutWidth > 0) {
                     listBox = list.getBoundingClientRect();
                     if ($abs(listBox.width - layoutWidth) >= 1 && listBox.width > 0) {
-                        scale = listBox.width / layoutWidth;
+                        scaleX = listBox.width / layoutWidth;
+                    }
+                    layoutHeight = list.offsetHeight;
+                    if (layoutHeight > 0 && $abs(listBox.height - layoutHeight) >= 1 && listBox.height > 0) {
+                        scaleY = listBox.height / layoutHeight;
                     }
                 }
 
                 itemIndex = itemsLength;
                 while (itemIndex--) {
                     box = items[itemIndex].getBoundingClientRect();
-                    if (scale !== 1) {
+                    if (scaleX !== 1 || scaleY !== 1) {
                         box = {
-                            left: box.left / scale,
-                            right: box.right / scale,
-                            top: box.top / scale,
-                            width: box.width / scale,
-                            height: box.height / scale
+                            left: box.left / scaleX,
+                            right: box.right / scaleX,
+                            top: box.top / scaleY,
+                            width: box.width / scaleX,
+                            height: box.height / scaleY
                         };
                     }
                     boxes[itemIndex] = box;
@@ -408,7 +452,7 @@ paste['define']('paste.ui.marquee', [
                 // was measured: unchanged CSS keeps it exactly.
                 computed = computedGap(list);
                 if (!running) {
-                    lastGap = itemsLength > 1 ? measuredGap(boxes[0], boxes[1]) : NaN;
+                    lastGap = measuredGap(boxes[0], boxes[1]);
                     lastComputedGap = computed;
                 }
                 gap = lastGap;
@@ -418,15 +462,11 @@ paste['define']('paste.ui.marquee', [
                     gap += computed - lastComputedGap;
                 }
                 distance = itemsLength * (width + gap);
-                duration = durationOf(root);
                 listWidth = list.clientWidth;
-                eligible = itemsLength > 0;
+                eligible = true;
                 itemIndex = itemsLength;
                 while (itemIndex-- && eligible) {
-                    item = items[itemIndex];
-                    eligible = item.matches(ITEM_SELECTOR) &&
-                        $abs(boxes[itemIndex].width - width) < 0.01 &&
-                        !item.matches(INTERACTIVE_SELECTOR) && !item.querySelector(INTERACTIVE_SELECTOR);
+                    eligible = $abs(boxes[itemIndex].width - width) < 0.01;
                 }
                 return {
                     items: items,
@@ -435,10 +475,9 @@ paste['define']('paste.ui.marquee', [
                     gap: gap,
                     distance: distance,
                     duration: duration,
-                    canAnimate: !mediaquery['motionReduced'](motion) && $isFinite(duration) && duration > 0 &&
-                        itemsLength > 1 && width > 0 && height > 0 && $isFinite(gap) && gap >= 0 &&
+                    canAnimate: width > 0 && height > 0 && $isFinite(gap) && gap >= 0 &&
                         listWidth > 0 && distance >= listWidth + width &&
-                        !list.contains($d.activeElement) && eligible
+                        eligible
                 };
             };
 
@@ -661,11 +700,10 @@ paste['define']('paste.ui.marquee', [
             // user's pause preference set once focus moves away.
             subscriptions.push(new Subscription('focusin', list, refresh));
             subscriptions.push(new Subscription('focusout', list, refresh));
-            // The watched surface is this list's own children — the
-            // module never observes the document to learn its root's
-            // lifecycle; bindings are page-lifetime.
+            // Membership and interactivity are local to the list. The
+            // document is never observed for this root's lifecycle.
             try {
-                mutations.observe(list, CHILD_LIST);
+                mutations.observe(list, CONTENT_CHANGES);
             } catch (mutationObserveError) {
                 deactivate();
                 return;

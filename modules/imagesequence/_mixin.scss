@@ -2,19 +2,19 @@
 // Paste Elements - Image Sequence Mixin
 // ==========================================================================
 
-// Optional presentation defaults for a sequence host, keyed on the
-// declaration itself — the same data-paste-imagesequence attribute
-// the module binds — so nothing extra is authored to receive them.
+// Optional presentation defaults for the caller's sequence-host selector.
+// The emitting stylesheet uses :where([data-paste-imagesequence]).
 // They apply to a non-img host, whose frames paint as a background:
 // a block box whose background centers, covers and does not repeat.
-// :where() gives the rule zero specificity, so any rule the page
-// writes for its own host wins; layout, sizing, crop, fit and the
-// authored baseline image stay the page's own CSS. A host carrying the
-// hidden attribute is left to the user agent's display: none. An img
+// The default emitter has zero specificity; custom selectors retain
+// their own specificity. Layout, sizing, crop, fit and the
+// authored baseline image stay the page's own CSS. Ordinary hidden
+// hosts keep the user agent's display: none;
+// hidden="until-found" keeps its box for native find-in-page. An img
 // host and the authored skip control (an ordinary button) get nothing
 // here.
 @mixin paste-ui-imagesequence() {
-  :where([data-paste-imagesequence]:not(img):not([hidden])) {
+  &:where(:not(img)):where(:not([hidden]), [hidden="until-found" i]) {
     background-position: center center;
     background-repeat: no-repeat;
     background-size: cover;

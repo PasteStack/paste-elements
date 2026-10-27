@@ -164,8 +164,8 @@ function fixture(options = {}) {
     vm.runInNewContext(
         readModuleSource('paste/ui/scrollspy.js'),
         {
-            window: {decodeURIComponent: decodeURIComponent},
-            document: {readyState: options.readyState || 'loading'},
+            window: {decodeURIComponent: decodeURIComponent, ResizeObserver: options.ResizeObserver},
+            document: {readyState: options.readyState || 'loading', body: {nodeName: 'BODY'}},
             console,
             paste: {define(name, deps, factory) {
                 assert.equal(name, 'paste.ui.scrollspy');
@@ -435,16 +435,18 @@ test('a page that cannot scroll does not light the last section', () => {
         'a non-scrolling page treated offset 0 as the bottom');
 });
 
-test('the minimum width parses whole numbers only', () => {
+test('the minimum width retains decimal prefix parsing', () => {
     // Anything but digits is no minimum at all; '0' is a minimum of
     // zero. The attribute text is read untrimmed.
-    for (const value of ['abc', '0', '', '-5', '9e2', ' 900', '900 ', '900.', '9.5']) {
+    for (const value of ['abc', '0', '', '-5', '9e2', '9.5']) {
         const f = fixture({scrollTop: 1600, minWidth: value, viewportWidth: 800});
         assert.ok(f.links[1].parentElement.classes.has('active'),
             value + ': a malformed minimum made the spy ineligible');
     }
-    const f = fixture({scrollTop: 1600, minWidth: '900', viewportWidth: 800});
-    assert.ok(!f.links[1].parentElement.classes.has('active'), 'a valid minimum was ignored');
+    for (const value of ['900', ' 900', '900 ', '900.', '900px']) {
+        const f = fixture({scrollTop:1600,minWidth:value,viewportWidth:800});
+        assert.ok(!f.links[1].parentElement.classes.has('active'), value);
+    }
 });
 
 test('every armed pass reuses one hoisted callback', () => {
@@ -669,4 +671,43 @@ test('an initially ineligible spy waits for resize to refresh viewport eligibili
     f.fireResize();
     f.pump();
     assert.ok(f.links[1].parentElement.classes.has('active'));
+});
+
+
+test('late content growth recalibrates the spy through one observed pass', () => {
+    const observed = [];
+    let changed;
+    const f = fixture({scrollTop: 1600, readyState: 'complete',
+        ResizeObserver: class {
+            constructor(callback) { changed = callback; }
+            observe(target) { observed.push(target); }
+        }});
+    assert.equal(observed.length, 5, 'the body, nav and three linked sections are observed');
+    assert.ok(f.links[1].parentElement.classes.has('active'));
+    const before = f.boundsReads.count;
+    f.sections.two.rect.top = 3000;
+    f.sections.three.rect.top = 4000;
+    for (let i = 0; i < 25; i += 1) changed();
+    assert.equal(f.pendingFrames(), 1);
+    assert.equal(f.boundsReads.count, before, 'observer delivery measured synchronously');
+    f.pump();
+    assert.equal(f.boundsReads.count - before, 4);
+    assert.ok(f.links[0].parentElement.classes.has('active'), 'the marker kept the pre-growth section');
+});
+
+test('an unavailable layout observer leaves resize correction intact', () => {
+    const f = fixture({ResizeObserver: function () { throw new Error('unavailable'); }});
+    f.state.scrollTop = 1600;
+    f.fireResize();
+    f.pump();
+    assert.ok(f.links[1].parentElement.classes.has('active'));
+});
+
+test('absent and touch-ineligible spies read no viewport width and construct no observer', () => {
+    for (const options of [{noParent: true}, {touch: true}, {links: []}]) {
+        let observers = 0;
+        const f = fixture({...options, ResizeObserver: function () { observers += 1; }});
+        assert.equal(f.layoutReads.width, 0);
+        assert.equal(observers, 0);
+    }
 });

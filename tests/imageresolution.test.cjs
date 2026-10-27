@@ -625,3 +625,17 @@ test('a negative background axis invalidates the whole explicit size', () => {
         assert.equal(resolution.needFor(200, 200, 100, 100, fit, 1), 0, fit);
     }
 });
+
+for (const origin of ['border-box', 'content-box']) {
+    test(origin + ' with no insets reuses geometry without offset reads', () => {
+        const resolution = loadResolution();
+        const element = {
+            get offsetWidth() { assert.fail('unnecessary offsetWidth'); },
+            get offsetHeight() { assert.fail('unnecessary offsetHeight'); }
+        };
+        const rect = {width: 200, height: 100};
+        const values = {'background-origin': origin, 'background-attachment': 'scroll', 'overflow-x': 'visible'};
+        const style = {getPropertyValue: name => values[name] || '0px'};
+        assert.equal(resolution.paintedBox({element, property: 'background-image'}, rect, style), rect);
+    });
+}

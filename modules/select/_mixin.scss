@@ -1,0 +1,64 @@
+// Apply to the authored wrapper. Importing this file emits no selectors.
+@mixin paste-ui-select($background: white, $border: #ced4da, $focus: #005fcc, $padding: 0.5rem 2rem 0.5rem 0.75rem) {
+  position: relative;
+  max-width: 100%;
+  &:where(:not([hidden]), [hidden="until-found" i]) {
+    display: inline-block;
+  }
+
+  > select[data-paste-select] {
+    box-sizing: border-box;
+    max-width: 100%;
+    margin: 0;
+    padding: $padding;
+    font: inherit;
+  }
+
+  > [data-paste-select-value] {
+    display: none;
+  }
+
+  @media (forced-colors: none) {
+    > select[data-paste-select-ready]:not([multiple]):where(:not([size]), [size="0"], [size="1"]):where(:not([hidden]), [hidden="until-found" i]):has(+ [data-paste-select-value]:where(:not([hidden]), [hidden="until-found" i])) {
+      position: relative;
+      z-index: 1;
+      opacity: 0;
+
+      + [data-paste-select-value]:where(:not([hidden]), [hidden="until-found" i]) {
+        display: block;
+        position: absolute;
+        inset: 0;
+        box-sizing: border-box;
+        padding: $padding;
+        border: 1px solid $border;
+        background: $background;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        pointer-events: none;
+
+        &::after {
+          content: "";
+          position: absolute;
+          right: 0.75rem;
+          top: 50%;
+          width: 0.4em;
+          height: 0.4em;
+          border-right: 0.125em solid currentColor;
+          border-bottom: 0.125em solid currentColor;
+          transform: translateY(-75%) rotate(45deg);
+        }
+      }
+
+      &:focus-visible + [data-paste-select-value] {
+        outline: 2px solid $focus;
+        outline-offset: 2px;
+      }
+
+      &:disabled + [data-paste-select-value] {
+        opacity: 0.6;
+      }
+    }
+
+  }
+}

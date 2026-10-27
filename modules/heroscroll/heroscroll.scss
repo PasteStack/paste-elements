@@ -4,4 +4,6 @@
 
 @import "mixin";
 
-@include paste-ui-heroscroll();
+.paste-ui-hero {
+  @include paste-ui-heroscroll();
+}

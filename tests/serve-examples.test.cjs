@@ -368,7 +368,8 @@ test('every module source is served at exactly its declared dist URL', async () 
         .map((name) => path.join(root, name, name + '.js'))
         .filter((file) => fs.existsSync(file));
     const sources = tierSources(modulesRoot)
-        .concat(tierSources(path.join(modulesRoot, 'utilities')));
+        .concat(tierSources(path.join(modulesRoot, 'utilities')))
+        .concat(tierSources(path.join(modulesRoot, 'form')));
     assert.ok(sources.length >= 10, 'the scan found almost no module sources');
     const {port, server} = await startFixture();
     try {
