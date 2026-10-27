@@ -208,6 +208,7 @@ FakeSubscription.registry = [];
 FakeEvent.Subscription = FakeSubscription;
 
 const eventModule = {
+    bind: (...args) => new FakeSubscription(...args),
     Event: FakeEvent,
     Subscription: FakeSubscription,
     DocumentEvent: {
@@ -794,6 +795,7 @@ function frameDriver() {
 function nestedSourcePath(file) {
     const base = path.basename(file);
     const name = base.slice(0, -path.extname(base).length);
+    if (file.indexOf('/form/') !== -1) return path.join(sourceRoot, 'form', name, base);
     return file.indexOf('/utilities/') !== -1 ?
         path.join(sourceRoot, 'utilities', name, base) :
         path.join(sourceRoot, name, base);
@@ -910,7 +912,14 @@ function loadModule(spec) {
     // the fake needs the page's document to do the same.
     activeDocument = document;
     const window = spec.sharedWindow || {};
+    // A native prototype accessor bypasses form named properties. Fixtures
+    // hold their collection explicitly; real-browser probes cover shadowing.
+    function HTMLFormElement() {}
+    Object.defineProperty(HTMLFormElement.prototype, 'elements', {
+        get() { return this.nativeElements || this.elements; }
+    });
     const windowDefaults = {
+        HTMLFormElement: HTMLFormElement,
         innerHeight: 800,
         innerWidth: 600,
         pageYOffset: 0,
@@ -1088,6 +1097,7 @@ function openUiStack(env) {
         imageresolution: imageresolutionLoaded.module,
         mediaquery: mediaqueryLoaded.module
     };
+    if (env.beforeElements) { env.beforeElements(modules); }
     if (env.scrollscrub !== false) {
         modules.scrollscrub = loadModule({
             file: 'paste/ui/scrollscrub.js',
@@ -1141,7 +1151,42 @@ function openUiStack(env) {
 
 
 
+function loadFormDom(window) {
+    const result = {};
+    function NativeElement() {}
+    function NativeNode() {}
+    function NativeEventTarget() {}
+    for (const key of ['getAttribute', 'setAttribute', 'hasAttribute', 'removeAttribute', 'querySelectorAll']) {
+        NativeElement.prototype[key] = function (...args) { return this[key](...args); };
+    }
+    for (const key of ['insertBefore', 'appendChild']) {
+        NativeNode.prototype[key] = function (...args) { return this[key](...args); };
+    }
+    for (const key of ['classList', 'tagName']) {
+        Object.defineProperty(NativeElement.prototype, key, {get() { return this[key]; }});
+    }
+    for (const key of ['parentElement', 'firstChild']) {
+        Object.defineProperty(NativeNode.prototype, key, {get() { return this[key]; }});
+    }
+    Object.defineProperty(NativeNode.prototype, 'nodeType', {get() { return this.nodeType || (this.tagName ? 1 : 9); }});
+    NativeEventTarget.prototype.addEventListener = function (type, listener, capture) {
+        const element = this;
+        return this.addEventListener(type, function (event) { return listener.call(element, event); }, capture);
+    };
+    NativeEventTarget.prototype.dispatchEvent = function (event) { return this.dispatchEvent(event); };
+    window = Object.assign({}, window, {Element: NativeElement, Node: NativeNode, EventTarget: NativeEventTarget});
+    vm.runInNewContext(readModuleSource('paste/ui/utilities/form-dom.js'), {
+        window, paste: {define(name, deps, factory) {
+            assert.equal(name, 'paste.ui.utilities.form-dom');
+            assert.equal(deps.length, 0);
+            factory(result);
+        }}
+    });
+    return result;
+}
+
 module.exports = {
+    loadFormDom: loadFormDom,
     Element: Element,
     boundsFromElement: boundsFromElement,
     FakeEvent: FakeEvent,
@@ -1164,3 +1209,17 @@ module.exports = {
     mediaQueryList: mediaQueryList,
     nowMs: nowMs
 };
+
+// The fragment utility captures native members to survive named form controls.
+function fragmentDomWindow(window) {
+    const proto = {};
+    for (const name of ['getAttribute','hasAttribute','setAttribute','removeAttribute','querySelectorAll']) {
+        proto[name] = function (...args) { return this[name](...args); };
+    }
+    Object.defineProperty(proto, 'innerHTML', {set(value) { this.innerHTML = value; }});
+    Object.defineProperty(proto, 'classList', {get() { return this.classList; }});
+    window.Element = {prototype:proto};
+    window.Node = {prototype:{contains(node) { return this.contains(node); }}};
+    return window;
+}
+module.exports.fragmentDomWindow = fragmentDomWindow;

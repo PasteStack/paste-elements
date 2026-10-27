@@ -1,0 +1,74 @@
+// Declarations for the selector that includes each mixin; no CSS on import.
+@import "../../base/variables";
+
+@mixin paste-ui-form-field($error-color: $paste-color-danger, $border-color: #ced4da, $focus-color: #80bdff, $focus-ring: rgba(0, 123, 255, 0.25), $error-ring: rgba(220, 53, 69, 0.25), $disabled-background: #e9ecef) {
+  margin-bottom: 1rem;
+
+  label {
+    &:where(:not([hidden]), [hidden="until-found" i]) {
+      display: block;
+    }
+    margin-bottom: 0.25rem;
+    font-weight: 500;
+
+    .required {
+      color: $error-color;
+      margin-left: 0.125rem;
+    }
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+  textarea,
+  select {
+    &:where(:not([hidden]), [hidden="until-found" i]) {
+      display: block;
+    }
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 1rem;
+    line-height: 1.5;
+    border: 1px solid $border-color;
+    border-radius: 0.25rem;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+
+    &:focus {
+      border-color: $focus-color;
+      outline: 0;
+      @media (forced-colors: active) {
+        outline: 2px solid Highlight;
+        outline-offset: 2px;
+      }
+      box-shadow: 0 0 0 0.2rem $focus-ring;
+    }
+
+    &:disabled {
+      background-color: $disabled-background;
+      opacity: 1;
+    }
+  }
+
+  &.has-error {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+    textarea,
+    select {
+      border-color: $error-color;
+
+      &:focus {
+        box-shadow: 0 0 0 0.2rem $error-ring;
+      }
+    }
+  }
+}
+
+@mixin paste-ui-form-description($color: $paste-color-secondary) {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: $color;
+}
+
+@mixin paste-ui-form-error($color: $paste-color-danger) {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: $color;
+}

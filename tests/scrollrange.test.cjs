@@ -967,3 +967,23 @@ test('a subject that is its own root refuses', () => {
     scroller.setAttribute('data-scrub-mode', 'container');
     assert.ok(!geometry.read(scroller).resolved.error, 'a container scope that is its root refused');
 });
+
+
+test('caller-owned measurement is refreshed and cleared when the range degenerates', () => {
+    const scope = new Element('div', 'scope');
+    scope.setAttribute('data-scrub-mode', 'container');
+    const {geometry, document} = loadScrollrange({elements: {scope}});
+    const range = geometry.read(scope);
+    document.documentElement.scrollHeight = 1600;
+    document.body.scrollHeight = 1600;
+    const into = {};
+    assert.strictEqual(geometry.measure(range, into), into);
+    assert.equal(into.end, 800);
+    assert.notStrictEqual(geometry.measure(range), into);
+    document.documentElement.scrollHeight = 800;
+    document.body.scrollHeight = 800;
+    assert.strictEqual(geometry.measure(range, into), into);
+    assert.equal(into.progress, null);
+    assert.equal(into.start, null);
+    assert.equal(into.end, null);
+});

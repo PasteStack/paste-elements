@@ -1,0 +1,9 @@
+// Message presentation is optional and local to the including selector.
+@mixin paste-ui-imageupload-message($loading-text: "Uploading…") {
+  &[data-image-upload-error-message]::before {
+    content: attr(data-image-upload-error-message);
+  }
+  &[data-image-upload-loading]::after {
+    content: $loading-text;
+  }
+}

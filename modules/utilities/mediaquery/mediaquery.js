@@ -4,7 +4,7 @@
 /**
  * @module paste/ui/utilities/mediaquery
  *
- * The one MediaQueryList binding every paste element shares. Core's
+ * The MediaQueryList binding implementation paste elements share. Core's
  * event Subscription accepts only Nodes and window, so it would rebind a
  * MediaQueryList to the document; this utility is that narrow,
  * documented exception, held in one place instead of one copy per

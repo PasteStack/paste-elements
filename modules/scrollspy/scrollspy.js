@@ -13,17 +13,18 @@
  * nothing contributes no breakpoint.
  *
  * Options, on the nav element:
- *   data-spy-min-width — a whole number of CSS pixels, digits only and
- *                        read untrimmed; at or below it the spy is
- *                        ineligible and clears its marker. Any other
- *                        spelling is ignored (no minimum).
+ *   data-spy-min-width — original decimal parseInt semantics: leading
+ *                        whitespace and numeric prefixes are accepted.
+ *                        At or below it the marker clears. No numeric
+ *                        prefix means no minimum.
  *   data-spy-touch     — opts the nav in on touch devices; without it a
  *                        touch device keeps the baseline and the module
  *                        binds no scroll or resize listener at all.
  *
  * Scheduling: one owned phased frame carries every measurement and
  * every class write. A scroll marks the selection stale; a resize and
- * the document's load mark geometry stale. The read phase takes the
+ * the document's load mark geometry stale. Where ResizeObserver exists,
+ * size changes in the body, nav or linked sections do the same. The read phase takes the
  * viewport width (on geometry passes only — a scroll cannot change
  * it), the geometry and the scroll position; the write phase moves the
  * marker. Only the define-time selection runs outside a frame.
@@ -74,14 +75,13 @@ paste['define'](
             requestPhased = animation_frame['requestPhased'],
             boundsFromElement = dom['Bounds']['fromElement'],
             ACTIVE_CLASS = 'active',
-            WHOLE_NUMBER = /^[0-9]+$/,
 
             $parent = dom['querySelector']('[data-paste-scrollspy]') || dom['querySelector']('.paste-ui-section-nav'),
             scrollBreakpoints = $parent ? dom['get']('a[href^="#"]:not(.paste-ui-section-nav-toggle)', $parent) : null,
             minWidth = 0,
             minWidthText = $parent ? $parent.getAttribute('data-spy-min-width') : null,
             scrollTop = 0,
-            windowWidth = getViewportWidth(),
+            windowWidth = 0,
             // data-spy-touch opts an individual nav into scrollspy on
             // touch devices; without it the device keeps the baseline.
             touchIneligible = !!featuredetection['touch'] && !($parent && $parent.hasAttribute('data-spy-touch')),
@@ -306,13 +306,12 @@ paste['define'](
                 var index = 0,
                     remaining = scrollBreakpoints ? scrollBreakpoints.length : 0,
                     link,
-                    target;
+                    target,
+                    observer;
                 if (!remaining || touchIneligible) {
                     return;
                 }
-                if (minWidthText !== null && WHOLE_NUMBER.test(minWidthText)) {
-                    minWidth = Number(minWidthText);
-                }
+                minWidth = parseInt(minWidthText, 10) || 0;
 
                 // Resolve each link's target once — links naming nothing
                 // contribute no breakpoint. The link list is released
@@ -331,6 +330,7 @@ paste['define'](
                     return;
                 }
                 lastGroup = groups.length - 1;
+                windowWidth = getViewportWidth();
 
                 subscriptions.push(new Subscription('scroll', $w, scrollHandler, null));
                 subscriptions.push(new Subscription('resize', $w, markGeometry, null));
@@ -353,6 +353,22 @@ paste['define'](
                 // geometry already.
                 if ($d.readyState !== 'complete') {
                     subscriptions.push(new Subscription('load', $w, markGeometry, null, 1));
+                }
+                // Content can resize after load without any window input.
+                // Observe the declared geometry, and coalesce its reports
+                // through the existing pass; scrolling still uses the cache.
+                if ($w.ResizeObserver) {
+                    try {
+                        observer = new $w.ResizeObserver(markGeometry);
+                        observer.observe($d.body);
+                        observer.observe($parent);
+                        index = spyTargets.length;
+                        while (index--) {
+                            observer.observe(spyTargets[index]);
+                        }
+                    } catch (ignore) {
+                        // Window resize and load remain the fallback.
+                    }
                 }
             };
 

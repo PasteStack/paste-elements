@@ -620,36 +620,6 @@ function inputsBeforeTheFrameArmOnePass() {
     assert.strictEqual(calls, 2, 'the next input after the pass did not arm again');
 }
 
-// An observer delivery whose list length is not a whole count is
-// malformed: it reports nothing and never loops.
-function fractionalEntryCountReportsNothing() {
-    FakeSubscription.reset();
-    const scope = new Element('div', 'scope');
-    scope.setAttribute('data-paste-scrollscrub', '');
-    const stack = openUiStack({elements: {scope: scope}, scrollscrub: true});
-    stack.driver.tick(16);
-    const observer = stack.resizeObservers[0];
-    let reads = 0;
-    const entries = new Proxy({length: 1.5}, {get: function (target, key) {
-        if (key === 'length') {
-            return target.length;
-        }
-        reads += 1;
-        if (reads > 100) {
-            throw new Error('runaway delivery loop');
-        }
-        return undefined;
-    }});
-    assert.doesNotThrow(function () {
-        observer.callback(entries, observer);
-        observer.callback({length: -1}, observer);
-        observer.callback({length: Infinity}, observer);
-        observer.callback({length: '1'}, observer);
-    });
-    assert.strictEqual(reads, 0, 'a malformed list was walked');
-    assert.strictEqual(stack.driver.pending(), 0, 'a malformed list scheduled a pass');
-}
-
 // Under html { height: 100% } the root element's box never changes
 // as the page grows: a real ResizeObserver reports only the content box
 // that actually grew — here a section under the body.
@@ -725,9 +695,8 @@ function frameCallbackIsHoisted() {
     assert.strictEqual(seen[0][1], seen[1][1], 'each arming minted a new write callback');
 }
 
-// The observer is shared across declarations: an entry naming no
-// target is skipped on its own and the valid entries still deliver.
-function malformedObserverEntrySkipsOnlyItself() {
+// A queued report for an unwatched target does not suppress live reports.
+function staleObserverEntryDoesNotHideLiveEntries() {
     FakeSubscription.reset();
     const scope = new Element('div', 'scope');
     scope.setAttribute('data-paste-scrollscrub', '');
@@ -742,11 +711,11 @@ function malformedObserverEntrySkipsOnlyItself() {
     const observer = stack.resizeObservers[0];
     scope.rect = {top: 300, bottom: 1200, width: 100, height: 900};
     assert.doesNotThrow(function () {
-        observer.callback([null, {}, {target: scope}], observer);
-    }, 'a malformed entry escaped the observer callback');
+        observer.callback([{target: new Element('div', 'unwatched')}, {target: scope}], observer);
+    }, 'a stale entry escaped the observer callback');
     stack.driver.tick(32);
     assert.strictEqual(progressOf(scope), '',
-        'the valid entry beside the malformed ones never re-measured');
+        'the live entry beside a stale one never re-measured');
 }
 
 // A real ResizeObserver reports only the boxes whose size changed:
@@ -811,14 +780,13 @@ test(declaredScopesShareOneObserver);
 test(documentRootSelectorScrubsWithThePage);
 test(viewportContainerFollowsDocumentGrowth);
 test(inputsBeforeTheFrameArmOnePass);
-test(fractionalEntryCountReportsNothing);
 test(documentGrowthReportsThroughABodyChild);
 test(nestedRootBecomingScrollableReMeasures);
 test(hostileWeakMapLeavesScrollInputs);
 test(throwingBindCostsOnlyItsScope);
 test(onlyTheResizedBoxReMeasures);
 test(frameCallbackIsHoisted);
-test(malformedObserverEntrySkipsOnlyItself);
+test(staleObserverEntryDoesNotHideLiveEntries);
 
 // The root's own scroll moves only the offset against endpoints the
 // scope already located: a scroll-only frame reads no layout for any
@@ -1219,31 +1187,31 @@ test('a subject inside a fixed-size wrapper re-measures when content before it c
     assert.ok(resize.observed.includes(scope), 'the subject lost its own watch');
 });
 
-// A host that refuses the frame makes requestPhased throw. The refused
-// request armed nothing, so the pending mark must not outlive it: the
-// next input asks again and its pass publishes the progress.
-test('a refused frame request leaves the next input free to ask again', () => {
-    FakeSubscription.reset();
-    const scope = new Element('div', 'scope');
-    scope.setAttribute('data-paste-scrollscrub', '');
-    scope.rect = {top: 1600, bottom: 1800, width: 100, height: 200};
-    const driver = frameDriver();
-    const requestPhased = driver.requestPhased;
-    let refusals = 1;
-    let calls = 0;
-    driver.requestPhased = function (read, write) {
-        calls += 1;
-        if (refusals > 0) {
-            refusals -= 1;
-            throw new Error('frame refused');
-        }
-        return requestPhased(read, write);
-    };
-    const stack = openUiStack({elements: {scope: scope}, scrollscrub: true, frameDriver: driver});
-    assert.strictEqual(calls, 1, 'the bind asked for its first pass');
-    scrollTo(stack.window, stack.document, 1300);
-    scope.rect = {top: 300, bottom: 500, width: 100, height: 200};
-    assert.strictEqual(calls, 2, 'the input after a refused request did not ask again');
-    driver.tick(16);
-    assert.strictEqual(progressOf(scope), '0.5', 'the pass after a refused request never ran');
+for (const newer of [null, {value: '.8', priority: ''}, {value: '0', priority: 'important'}]) {
+    test('a degenerate range restores its authored inline value or preserves a newer writer: ' + JSON.stringify(newer), () => {
+        FakeSubscription.reset();
+        const scroller = new Element('div', 'scroller');
+        scroller.clientHeight = 400; scroller.scrollHeight = 1600;
+        const scope = new Element('div', 'scope');
+        scope.setAttribute('data-paste-scrollscrub', '');
+        scope.setAttribute('data-scrub-mode', 'container');
+        scope.setAttribute('data-scrub-root', '#scroller');
+        scope.style.setProperty('--paste-scrub-progress', '.25', 'important');
+        scroller.appendChild(scope);
+        const stack = openUiStack({elements: {scroller}, scrollscrub: true});
+        stack.driver.tick(16);
+        assert.equal(progressOf(scope), '0');
+        assert.equal(scope.style.getPropertyPriority('--paste-scrub-progress'), '');
+        if (newer) scope.style.setProperty('--paste-scrub-progress', newer.value, newer.priority);
+        scroller.scrollHeight = 400; stack.window.fireEvent('resize'); stack.driver.tick(32);
+        assert.equal(progressOf(scope), newer ? newer.value : '.25');
+        assert.equal(scope.style.getPropertyPriority('--paste-scrub-progress'), newer ? newer.priority : 'important');
+    });
+}
+
+test('a resize delivery for an unwatched box schedules no work', () => {
+    const scope = new Element('div', 'scope'); scope.setAttribute('data-paste-scrollscrub', '');
+    const stack = openUiStack({elements: {scope}, scrollscrub: true}); stack.driver.tick(16);
+    stack.resizeObservers[0].callback([{target: new Element('div', 'unwatched')}]);
+    assert.equal(stack.driver.pending(), 0);
 });

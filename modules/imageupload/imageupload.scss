@@ -1,0 +1,8 @@
+/*
+@module "paste.ui.imageupload";
+*/
+@import "mixin";
+
+[data-image-upload-message] {
+  @include paste-ui-imageupload-message();
+}

@@ -1,0 +1,22 @@
+// Importing this file defines the mixin without emitting selectors.
+@mixin paste-ui-js-tooltip($background: #444, $color: #fff, $padding: 20px, $radius: 5px) {
+  & {
+    position: fixed;
+    z-index: 5000;
+    padding: $padding;
+    margin-bottom: 11px;
+    background: $background;
+    color: $color;
+    border-radius: $radius;
+    pointer-events: none;
+  }
+  &::after {
+    content: "";
+    position: absolute;
+    right: 20px;
+    top: 100%;
+    border: 10px solid transparent;
+    border-bottom: 0;
+    border-top-color: $background;
+  }
+}

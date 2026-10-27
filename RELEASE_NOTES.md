@@ -1,3 +1,62 @@
+# paste-elements v0.7.0
+
+**Date:** 2026-10-26
+
+## Added
+
+- The form family, split by responsibility: `paste.ui.form.form_validity`
+  owns ordinary native validity reflection and blocking;
+  `paste.ui.form.form_apply` transports `form.paste-ui-apply` JSON
+  submission; `paste.ui.form.form_html` transports
+  `form.paste-ui-formhtml` HTML replies and owns the busy/failure classes
+  and failure event; `paste.ui.form.form_autosave` owns its request and
+  reply handling. Surface's serializer and existing wire format remain
+  accepted.
+- `paste.ui.utilities.io-html-fragment`: the shared HTML-fragment
+  transport behind `form_html`, `form_autosave`, `imageupload`,
+  `lazy_loader` and `fragment_navigation` — request lifecycle, target
+  ownership, fragment placement, variables, busy state and cancellation.
+- `paste.ui.fragment_navigation`: fragment-driven navigation between
+  declared targets.
+- `paste.ui.lazy_loader`: restored page-driven deferred HTML loading; the
+  owning page requests visible content after its own state changes — no
+  automatic observer or scroll listener.
+- Restored elements: `paste.ui.carousel` (discrete paging, controls,
+  indicators, counter, named instances, events and cycling; native
+  buttons, pause/reduced motion, accurate variable-width paging and
+  complete disposal — see the matching Surface Carousel contract),
+  `paste.ui.sortable`, `paste.ui.select`, `paste.ui.js_tooltip`,
+  `paste.ui.allowed_chars`, `paste.ui.navigate_on_change`,
+  `paste.ui.prevent_double_submit`, `paste.ui.update_text_on_input_change`
+  and `paste.ui.imageupload`.
+- `paste.ui.utilities.form-dom`: contains the named-member boundary so
+  native form-member access no longer fails when a control has a name
+  such as `elements` or `addEventListener`, without reserving field names
+  or changing core.
+- Element-declared request deadlines: `data-paste-form-timeout` on forms
+  and the per-transport `data-*-timeout` attributes on `form_autosave`,
+  `imageupload`, `lazy_loader` and `fragment_navigation`, in decimal
+  milliseconds; the literal `0` disables the deadline and malformed
+  values fall back to the default.
+- An application-owned external-library wrapper example that uses core
+  URL dependencies to gate readiness; no extra loader or Surface element.
+- Shared `structure/` and `base/` SCSS layers and per-element style
+  contracts for the restored elements.
+
+## Changed
+
+- `form_html` also accepts the previous `data-paste-form` declaration
+  during migration. Existing background form consumers must move their
+  dependency to `form_apply` or `form_html`: loading
+  `paste.ui.form.form_validity` alone no longer transports submissions.
+
+## Removed
+
+- `paste.ui.io-reply-fragment-envelope`: the standalone client module and
+  its public `apply` API are retired; `form_autosave` now owns the reply
+  handling. Remove its script/dependency when migrating.
+- The single `modules/form/form.js` element, replaced by the form family.
+
 # paste-elements v0.6.0
 
 **Date:** 2026-10-22
@@ -43,19 +102,19 @@
 
 ## Added
 
-- `paste.ui.form`: `data-paste-form-timeout` sets the intercepted
+- `paste.ui.form.form_validity`: `data-paste-form-timeout` sets the intercepted
   request's deadline in decimal milliseconds (default 30000; the literal
   `0` opts out; malformed values fall back rather than silently
   disabling the deadline), so a stalled request can no longer hold the
   busy state forever.
-- `paste.ui.form`: every outcome after transmission dispatches a
+- `paste.ui.form.form_validity`: every outcome after transmission dispatches a
   bubbling, cancelable `paste.ui.form:failed` event whose
   `detail.reason` is `"error"`, `"timeout"`, `"abort"` or `"response"`;
   a listener calling `preventDefault()` owns the failure UX.
 
 ## Changed
 
-- `paste.ui.form`: without a listener the form resubmits natively only
+- `paste.ui.form.form_validity`: without a listener the form resubmits natively only
   where a replay cannot duplicate the submission — a `get`, or a form
   carrying `data-paste-form-idempotent` — and any other failure appends
   and focuses a `paste-ui-form-failure` `role="alert"` notice preserving
@@ -68,7 +127,7 @@
 
 ## Added
 
-- `paste.ui.form`: a `form[data-paste-form]` inside an IO reply fragment
+- `paste.ui.form.form_validity`: a `form[data-paste-form]` inside an IO reply fragment
   target submits through `paste.io` in the background and the returned markup
   replaces the target's content. The request is the one the browser would have
   sent — the submitting button's `formaction`/`formmethod`/`formenctype`/

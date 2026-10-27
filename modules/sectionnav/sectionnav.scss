@@ -4,4 +4,6 @@
 
 @import "mixin";
 
-@include paste-ui-sectionnav();
+.paste-ui-section-nav {
+  @include paste-ui-sectionnav();
+}

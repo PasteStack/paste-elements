@@ -1,0 +1,54 @@
+@mixin paste-ui-carousel($duration: 0.35s, $easing: ease) {
+  > .paste-ui-carousel-items,
+  > .paste-ui-carousel-wrap > .paste-ui-carousel-items {
+    position: relative;
+  }
+
+  &.paste-ui-carousel-loaded {
+    overflow: hidden;
+    touch-action: pan-y;
+
+    > .paste-ui-carousel-wrap {
+      overflow: hidden;
+      touch-action: pan-y;
+    }
+
+    > .paste-ui-carousel-items,
+    > .paste-ui-carousel-wrap > .paste-ui-carousel-items {
+      &:not([hidden]) {
+        display: flex;
+      }
+      flex-wrap: nowrap;
+      left: 0;
+      transition: left $duration $easing;
+
+      > .paste-ui-carousel-item {
+        flex: 0 0 100%;
+        min-width: 0;
+      }
+    }
+
+    &[data-paste-carousel-slide-width="variable"] > .paste-ui-carousel-items > .paste-ui-carousel-item,
+    &[data-paste-carousel-slide-width="variable"] > .paste-ui-carousel-wrap > .paste-ui-carousel-items > .paste-ui-carousel-item {
+      flex: 0 0 auto;
+    }
+
+    > .paste-ui-carousel-no-transition,
+    > .paste-ui-carousel-wrap > .paste-ui-carousel-no-transition {
+      transition: none;
+    }
+  }
+
+  > .paste-ui-carousel-indicator:not([hidden]) {
+    display: flex;
+    list-style: none;
+    padding: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    > .paste-ui-carousel-items,
+    > .paste-ui-carousel-wrap > .paste-ui-carousel-items {
+      transition: none;
+    }
+  }
+}

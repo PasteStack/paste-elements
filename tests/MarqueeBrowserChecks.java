@@ -301,10 +301,19 @@ public final class MarqueeBrowserChecks {
             case "webkit" -> playwright.webkit();
             default -> throw new IllegalArgumentException("Unknown browser engine: " + engine);
         };
-        BrowserType.LaunchOptions launch = new BrowserType.LaunchOptions().setHeadless(true);
-        // Include links in native tab navigation independently of the host's
-        // macOS keyboard preference, as the keyboard scenario requires.
-        if (engine.equals("firefox")) launch.setFirefoxUserPrefs(Map.of("accessibility.tabfocus", 7));
+        BrowserType.LaunchOptions launch = new BrowserType.LaunchOptions().setHeadless(true)
+            .setProxy(new com.microsoft.playwright.options.Proxy("http://127.0.0.1:9").setBypass("127.0.0.1,localhost"));
+        if (engine.equals("firefox")) {
+            launch.setFirefoxUserPrefs(Map.ofEntries(
+                Map.entry("accessibility.tabfocus", 7),
+                Map.entry("extensions.pocket.enabled", false),
+                Map.entry("browser.newtabpage.activity-stream.feeds.system.topstories", false),
+                Map.entry("browser.newtabpage.activity-stream.feeds.section.topstories", false),
+                Map.entry("browser.newtabpage.enabled", false), Map.entry("network.proxy.type", 1),
+                Map.entry("network.proxy.http", "127.0.0.1"), Map.entry("network.proxy.http_port", 9),
+                Map.entry("network.proxy.ssl", "127.0.0.1"), Map.entry("network.proxy.ssl_port", 9),
+                Map.entry("network.proxy.no_proxies_on", "localhost,127.0.0.1")));
+        }
         String executable = System.getenv("MARQUEE_CHROMIUM_EXECUTABLE");
         if (engine.equals("chromium") && executable != null && !executable.isBlank()) {
             launch.setExecutablePath(Path.of(executable));

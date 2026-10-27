@@ -1,0 +1,23 @@
+// Declarations for the selector that includes this mixin; no CSS on import.
+@mixin paste-ui-button() {
+  &:where(:not([hidden]), [hidden="until-found" i]) {
+    display: inline-block;
+  }
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+
+  &:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+}

@@ -1,4 +1,6 @@
 /* @module paste.ui.marquee */
 @import "mixin";
 
-@include paste-ui-marquee();
+.paste-ui-marquee {
+  @include paste-ui-marquee();
+}

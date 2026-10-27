@@ -4,4 +4,6 @@
 
 @import "mixin";
 
-@include paste-ui-autogrow();
+.autogrow, [data-paste-autogrow] {
+  @include paste-ui-autogrow();
+}

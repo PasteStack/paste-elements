@@ -27,7 +27,6 @@
  *                            never writes an opacity below it (default
  *                            0). Any other spelling, or a value above 1,
  *                            is the default.
- *   data-hero-hashclick      (hero) — see "Hash click" below.
  *
  * Motion effects — the content fade, the image fade and the background
  * parallax — are owned inline writes: the first write captures the
@@ -83,39 +82,8 @@
  * mode) and to body whenever the module defines, whether or not the page
  * has heroes — pages gate presentation on it.
  *
- * Hash click (inherited from the original heroscroll): on a non-touch
- * device, a click inside a hero carrying data-hero-hashclick whose next
- * element sibling — resolved when the click happens — is a connected
- * hero prevents the click's default and navigates to that hero
- * natively. A next hero with an id is a fragment navigation to it (the
- * hash setter: the address and history update, :target and hashchange
- * follow, and the page's scroll-behavior and scroll-margin apply); when
- * the address already carries that fragment the hero is scrolled into
- * view with scrollIntoView() and no history entry. A hero with no id
- * gets a history entry of its own (pushState, carrying the current
- * history state) and is then scrolled into view, so each Back returns
- * to the hero the visitor left. The entry keeps the current address,
- * except that a fragment naming an element (an id or an a element's
- * name, raw or percent-decoded, and in a quirks-mode document an a
- * element's name that matches once each code point is folded to the
- * lowercase of its uppercase form, as Chromium mostly resolves it
- * there) or the top of the document becomes the empty
- * fragment: the entry does not show that element, and an engine that
- * scrolls to an entry's fragment on traversal would show it
- * instead of the hero. Any other fragment, such as another script's
- * state tokens, is kept, and an address with a '#' keeps it, so the
- * entry reads as a bare address only when the visitor was on one.
- * That hero also carries the paste-ui-hero-destination class until the
- * next hash click, the hook the paste.ui.sectionnav stylesheet's target
- * clearance uses for a hero that is not a target.
- * The module never stamps generated ids on heroes and fires no event
- * of its own. A click whose path — the composed path where the
- * platform reports one, so a control inside a shadow root counts —
- * passes through an interactive element within the hero (a[href],
- * area[href], an SVG a with href or xlink:href, button, input, select,
- * textarea, label, summary, audio[controls], video[controls], iframe,
- * object, embed, [tabindex], [contenteditable]) is never prevented and
- * navigates nowhere.
+ * Navigation belongs to authored anchors and the browser. This module
+ * binds no click handler and never changes the URL or session history.
  *
  * @requires paste/util
  * @requires paste/dom
@@ -141,13 +109,13 @@ paste['define'](
         'use strict';
 
         var $w = window,
+            $style = $w['getComputedStyle'],
             $d = document,
             $math = Math,
             $min = $math.min,
             $max = $math.max,
             $round = $math.round,
             $parseFloat = parseFloat,
-            $decodeURIComponent = decodeURIComponent,
             $String = String,
             $Number = Number,
             $keys = Object['keys'],
@@ -164,10 +132,8 @@ paste['define'](
             HERO_TOUCH_CLASS = HERO_CLASS + '-touch',
             HERO_IMAGE_CLASS = HERO_CLASS + '-image',
             HERO_CONTENT_CLASS = HERO_CLASS + '-content',
-            HERO_DESTINATION_CLASS = HERO_CLASS + '-destination',
             DECIMAL = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/,
             PIXELS = /^(-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))px$/,
-            INTERACTIVE_TAG = /^(?:BUTTON|INPUT|SELECT|TEXTAREA|LABEL|SUMMARY|IFRAME|OBJECT|EMBED)$/,
             BACKGROUND_MULTIPLIER = 0.3,
             touchSupported = !!has['touch'],
             backgroundSizeSupported = typeof bodyStyle['backgroundSize'] === 'string',
@@ -202,6 +168,7 @@ paste['define'](
             // write phase.
             passHeight,
             passMotion = false,
+            hasEffects = false,
             passScrollTop = 0,
             passOffsetTop = 0,
             passViewport = 0,
@@ -212,211 +179,6 @@ paste['define'](
             pageSubscriptions = [],
             // The body's size watch, page-lifetime like the listeners.
             bodyObserver = null,
-            // The hero without an id a hash click last scrolled to: it
-            // carries the destination class, the target clearance's hook,
-            // until the next hash click.
-            destinationHero = null,
-
-            /*
-             * HERO CLICK
-             */
-            // Case folding by code point, as an engine that matches
-            // names without regard to case in quirks mode compares
-            // them: each code point becomes the lowercase of its
-            // uppercase form, so the long s, the Kelvin sign, final
-            // sigma, the micro sign and letters outside the basic plane
-            // fold with their letters. A code point whose case forms
-            // change its length, and the dotless i, which has no
-            // folding, stay as they are. Chromium also matches a few
-            // equal-length pairs that need full folding (some
-            // ligatures, Greek letters with diacritics); those are not
-            // looked up.
-            caseFold = function (text) {
-                var folded = '',
-                    remaining = text.length,
-                    index = 0,
-                    code,
-                    unit,
-                    upper,
-                    lower;
-                while (remaining--) {
-                    unit = text.charAt(index);
-                    code = text.charCodeAt(index);
-                    index += 1;
-                    // A surrogate pair is one code point.
-                    if (code >= 0xD800 && code <= 0xDBFF && remaining > 0) {
-                        code = text.charCodeAt(index);
-                        if (code >= 0xDC00 && code <= 0xDFFF) {
-                            unit += text.charAt(index);
-                            index += 1;
-                            remaining -= 1;
-                        }
-                    }
-                    upper = unit.toUpperCase();
-                    lower = upper.length === unit.length ? upper.toLowerCase() : unit.toLowerCase();
-                    folded += unit === '\u0131' || lower.length !== unit.length ? unit : lower;
-                }
-                return folded;
-            },
-            // Whether a fragment names an element as the browser looks
-            // it up: an id, else an a element with that name. In a
-            // quirks-mode document some engines also take an a element
-            // whose name matches without regard to case, as
-            // paste.ui.smoothscroll does there, so that counts too.
-            namesElement = function (name) {
-                var named,
-                    folded,
-                    remaining,
-                    index = 0;
-                if ($d.getElementById(name)) {
-                    return true;
-                }
-                named = $d.getElementsByName(name);
-                remaining = named.length;
-                while (remaining--) {
-                    if (named[index].nodeName === 'A') {
-                        return true;
-                    }
-                    index += 1;
-                }
-                if ($d['compatMode'] !== 'BackCompat') {
-                    return false;
-                }
-                named = $d.getElementsByTagName('a');
-                folded = caseFold(name);
-                remaining = named.length;
-                index = 0;
-                while (remaining--) {
-                    if (caseFold(named[index].getAttribute('name') || '') === folded) {
-                        return true;
-                    }
-                    index += 1;
-                }
-                return false;
-            },
-            // The address for a hero's own entry. A fragment that names
-            // an element, raw or percent-decoded, or the top of the
-            // document, gives way to an empty one ('page#'): an engine
-            // that scrolls to an entry's fragment on traversal would
-            // show that element instead of the hero, and the address
-            // would name what the entry does not show. Any other
-            // fragment, such as another script's state tokens, stays,
-            // and so does the '#': the entry reads as the page's bare
-            // first entry only when the visitor left that entry.
-            entryAddress = function (href, fragment) {
-                var decoded = fragment;
-                try {
-                    decoded = $decodeURIComponent(fragment);
-                } catch (malformed) {
-                    decoded = fragment;
-                }
-                if (fragment && (namesElement(fragment) || namesElement(decoded) ||
-                        decoded.toLowerCase() === 'top')) {
-                    return href.slice(0, href.indexOf('#') + 1);
-                }
-                return href;
-            },
-            // Native navigation to the next hero. A hero with an id is
-            // a fragment navigation — the address, history, :target and
-            // hashchange follow, and the page's scroll CSS applies; the
-            // hash setter does nothing for the fragment already current,
-            // so an unchanged address scrolls instead. A hero without
-            // an id has no address of its own: it gets a history entry
-            // before it is scrolled into view, so the entry the visitor
-            // leaves keeps its own position and Back returns to each
-            // hero in turn. A history that refuses the entry still
-            // scrolls.
-            goToHero = function (next) {
-                var location = $w.location,
-                    history = $w.history,
-                    before = location.hash,
-                    href = location.href;
-                if (destinationHero) {
-                    dom['removeCssClass'](destinationHero, HERO_DESTINATION_CLASS);
-                    destinationHero = null;
-                }
-                if (next.id) {
-                    location.hash = next.id;
-                    if (location.hash !== before) {
-                        return;
-                    }
-                } else {
-                    if (history && typeof history.pushState === 'function') {
-                        try {
-                            history.pushState(history.state, '', entryAddress(href, before.slice(1)));
-                        } catch (ignore) {
-                            // A refused entry still scrolls, with none.
-                        }
-                    }
-                    destinationHero = next;
-                    dom['addCssClass'](next, HERO_DESTINATION_CLASS);
-                }
-                next.scrollIntoView();
-            },
-            interactive = function (node) {
-                var tagName;
-                if (!node || node.nodeType !== 1) {
-                    return false;
-                }
-                tagName = (node.tagName || '').toUpperCase();
-                return ((tagName === 'A' || tagName === 'AREA') &&
-                        (node.hasAttribute('href') || node.hasAttribute('xlink:href'))) ||
-                    ((tagName === 'AUDIO' || tagName === 'VIDEO') && node.hasAttribute('controls')) ||
-                    INTERACTIVE_TAG.test(tagName) ||
-                    node.hasAttribute('tabindex') || node.hasAttribute('contenteditable');
-            },
-            // Whether the click passed through an interactive element
-            // below the hero itself — that element owns the click. The
-            // composed path reaches into shadow roots; without one, the
-            // parent chain from the event target stands in.
-            insideInteractive = function (e, hero) {
-                var path = typeof e.composedPath === 'function' ? e.composedPath() : null,
-                    remaining,
-                    index = 0,
-                    node;
-                if (path && path.length) {
-                    remaining = path.length;
-                    while (remaining--) {
-                        node = path[index];
-                        index += 1;
-                        if (node === hero) {
-                            return false;
-                        }
-                        if (interactive(node)) {
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                node = event['Event']['getEventTarget'](e);
-                while (node && node !== hero) {
-                    if (interactive(node)) {
-                        return true;
-                    }
-                    node = node.parentNode;
-                }
-                return false;
-            },
-            // The following hero as the document stands at the click:
-            // still a hero, still connected.
-            nextHero = function (element) {
-                var next = element.nextElementSibling;
-                if (!next || !dom['hasCssClass'](next, HERO_CLASS) || next.isConnected === false) {
-                    return null;
-                }
-                return next;
-            },
-            heroClickHandler = function (hero) {
-                return function (e) {
-                    var next = nextHero(hero.element);
-                    if (!next || insideInteractive(e, hero.element)) {
-                        return;
-                    }
-                    e.preventDefault();
-                    goToHero(next);
-                };
-            },
-
             // A plain decimal from 0 to 1, or the default — no falsy-zero,
             // no NaN, and no floor above full opacity.
             minOpacityAttribute = function (element) {
@@ -431,7 +193,7 @@ paste['define'](
             // The base offset the parallax starts from: the px vertical
             // component of a single-layer computed position, else 0.
             backgroundBaseY = function (heroImage) {
-                var text = $String($w.getComputedStyle(heroImage).getPropertyValue('background-position') || ''),
+                var text = $String($style(heroImage).getPropertyValue('background-position') || ''),
                     parts,
                     match;
                 if (text.indexOf(',') !== -1) {
@@ -449,7 +211,7 @@ paste['define'](
                 if (!heroContent) {
                     return {top : 0, bottom : 0};
                 }
-                heroContentStyle = $w.getComputedStyle(heroContent);
+                heroContentStyle = $style(heroContent);
                 return {
                     top : ($parseFloat(heroContentStyle.getPropertyValue('margin-top')) || 0) +
                           ($parseFloat(heroContentStyle.getPropertyValue('top')) || 0),
@@ -506,12 +268,14 @@ paste['define'](
                     // The base is read once, before the first parallax
                     // write: afterwards the computed position is the
                     // module's own write, never the authored base.
-                    if (image && hero.backgroundY === undefined) {
+                    if (image && !hero.imageFixed && hero.backgroundY === undefined) {
                         hero.backgroundY = backgroundSizeSupported ? backgroundBaseY(image) : 0;
                     }
-                    hero.contentBounds = boundsFromElement(hero.content);
-                    hero.contentVisualOffsets = measureContentVisualOffsets(hero.content);
-                    deriveVisualBounds(hero);
+                    if (image && hero.content) {
+                        hero.contentBounds = boundsFromElement(hero.content);
+                        hero.contentVisualOffsets = measureContentVisualOffsets(hero.content);
+                        deriveVisualBounds(hero);
+                    }
                 }
             },
 
@@ -533,7 +297,7 @@ paste['define'](
                     }
                     image = dom['querySelector']('.' + HERO_IMAGE_CLASS, element);
                     if (image && !backgroundSizeSupported) {
-                        imageUrl = $w.getComputedStyle(image).getPropertyValue('background-image');
+                        imageUrl = $style(image).getPropertyValue('background-image');
                         if (util['stringStartsWith'](imageUrl, 'url(') && util['stringEndsWith'](imageUrl, ')')) {
                             imageUrl = imageUrl.slice(4, -1).replace(/['"]/g, '');
                             image.style.backgroundImage = 'none';
@@ -558,8 +322,8 @@ paste['define'](
                         writtenImageOpacity : undefined,
                         writtenBackgroundTop : undefined
                     };
-                    if (!touchSupported && element.hasAttribute('data-hero-hashclick')) {
-                        pageSubscriptions.push(new Subscription('click', element, heroClickHandler(hero)));
+                    if (image && (!hero.imageFixed || hero.imageFade || hero.content)) {
+                        hasEffects = true;
                     }
                     heroes[index] = hero;
                     index += 1;
@@ -676,7 +440,7 @@ paste['define'](
                     geometryDirty = false;
                     // Measurements feed only the motion pass, which a
                     // touch device never runs.
-                    measurePending = !touchSupported;
+                    measurePending = !touchSupported && hasEffects;
                     if (fullHeight) {
                         height = dom['getViewportHeight']();
                         // On touch, a height-only change is the toolbar
@@ -712,6 +476,7 @@ paste['define'](
                 var heroes = heroList,
                     heroIndex,
                     hero,
+                    bounds,
                     scrollTop = passScrollTop,
                     offsetTop = passOffsetTop,
                     availableSpace = passViewport,
@@ -739,8 +504,9 @@ paste['define'](
                 heroIndex = heroes.length;
                 while (heroIndex--) {
                     hero = heroes[heroIndex];
-                    heroBottom = hero.bounds['getBottom']() - scrollTop;
-                    heroTop = hero.bounds['top'] - scrollTop;
+                    bounds = hero.bounds;
+                    heroTop = bounds['top'] - scrollTop;
+                    heroBottom = heroTop + bounds['height'];
 
                     // A hero the viewport cannot show keeps its last
                     // presentation — every write below is invisible
@@ -875,7 +641,7 @@ paste['define'](
                     }
                 }
 
-                if (touchSupported) {
+                if (touchSupported || !hasEffects) {
                     // Touch devices run no motion; the full-height
                     // geometry still follows a new viewport width or
                     // orientation.
