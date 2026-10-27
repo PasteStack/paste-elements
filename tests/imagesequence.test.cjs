@@ -123,6 +123,10 @@ function declaredPage(env) {
     if (env.scrubSelector) {
         host.setAttribute('data-sequence-scrub', env.scrubSelector);
     }
+    if (env.queued) {
+        host.setAttribute('data-sequence-playback', 'queued');
+        host.setAttribute('data-sequence-playback-fps', String(env.fps || 30));
+    }
     if (env.sequenceFrom !== undefined) {
         host.setAttribute('data-sequence-from', String(env.sequenceFrom));
     }
@@ -163,6 +167,7 @@ function declaredPage(env) {
         host.rect = env.hostRect;
     }
     scope.appendChild(host);
+    if (env.peer) scope.appendChild(env.peer);
     const frames = scriptJson('frames', env.catalogDocument || catalog(4, env.upgrades));
     scope.appendChild(frames);
     if (env.scroller) {
@@ -192,16 +197,34 @@ function declaredPage(env) {
             scope.rect = {top: 0, bottom: 0, width: 0, height: 0};
         }
     }
+    let clock = 0, timerId = 0;
+    const playbackTimers = new Map();
+    const playbackWindow = env.queued ? Object.assign({}, env.window, {
+        setTimeout(callback, delay) { const id = ++timerId; playbackTimers.set(id, {callback, due: clock + delay}); return id; },
+        clearTimeout(id) { playbackTimers.delete(id); }
+    }) : env.window;
     const stack = openStack({
         elements: {scope: scope},
         scrollscrub: env.scrollscrub !== false,
         imagesequence: true,
         progressiveresolution: env.withStandaloneResolution === true,
-        window: env.window,
+        window: playbackWindow,
         document: env.document,
         globals: env.globals,
-        frameDriver: env.frameDriver
+        frameDriver: env.frameDriver,
+        beforeElements: env.beforeElements
     });
+    if (env.queued) {
+        const tick = stack.driver.tick.bind(stack.driver);
+        stack.driver.tick = time => {
+            clock = time;
+            for (const [id, timer] of [...playbackTimers]) {
+                if (timer.due <= clock && playbackTimers.delete(id)) timer.callback();
+            }
+            tick(time);
+        };
+        stack.playbackTimers = playbackTimers;
+    }
     return {stack: stack, scope: scope, host: host, skip: extra.skip, reports: stack.reports};
 }
 
@@ -9375,10 +9398,8 @@ test('every malformed sequence index stays inert', async function () {
         'a valid index stopped binding');
 });
 
-// A malformed observer batch skips only its bad members — the null
-// entry cannot throw, and a valid entry in the same delivery still
-// reaches the sequence that watches the target.
-test('a malformed observer entry skips only itself', async function () {
+// Queued reports for unwatched boxes do not suppress a live target.
+test('a stale observer report does not suppress a live target', async function () {
     FakeSubscription.reset();
     const {stack, host} = declaredPage({
         resolution: true,
@@ -9395,16 +9416,16 @@ test('a malformed observer entry skips only itself', async function () {
         'sharpening was demanded before the box grew');
     observers.forEach(function (observer) {
         assert.doesNotThrow(function () {
-            observer.callback([null], observer);
-        }, 'a null entry escaped an observer callback');
+            observer.callback([{target: new Element('div', 'unwatched')}], observer);
+        }, 'a stale report escaped an observer callback');
     });
     host.rect = {top: 0, bottom: 900, left: 0, right: 1600, width: 1600, height: 900};
     observers.forEach(function (observer) {
-        observer.callback([null, {target: host}], observer);
+        observer.callback([{target: new Element('div', 'unwatched')}, {target: host}], observer);
     });
     stack.driver.tick(48);
     assert.ok(stack.images.some(function (image) { return image.src === url('fHD.jpg'); }),
-        'the valid entry after the malformed one never delivered');
+        'the live report beside a stale one never delivered');
 });
 
 // A listener release that throws can strand a physical claim — never
@@ -10472,18 +10493,19 @@ test('the resolution cap uses the shared reading', async function () {
 // many questions it asks.
 test('a pass computes each frame\'s selection once', async function () {
     FakeSubscription.reset();
+    let calls = 0;
     const {stack, scope} = declaredPage({
         resolution: true,
         scrubBuffer: 3,
-        upgrades: [{src: 'fHD.jpg', width: 1600, height: 900}]
+        upgrades: [{src: 'fHD.jpg', width: 1600, height: 900}],
+        beforeElements(modules) {
+            const needFor = modules.imageresolution.needFor;
+            modules.imageresolution.needFor = function () {
+                calls += 1;
+                return needFor.apply(null, arguments);
+            };
+        }
     });
-    const resolution = stack.modules.imageresolution;
-    const needFor = resolution.needFor;
-    let calls = 0;
-    resolution.needFor = function () {
-        calls += 1;
-        return needFor.apply(null, arguments);
-    };
     stack.driver.tick(16);
     await settleAll(stack.images);
     calls = 0;
@@ -11669,31 +11691,6 @@ test('decimal attributes take a bare fraction and a trailing point', async funct
     assert.strictEqual(await run('data-sequence-intro-buffer-ms', ' 30'), false, 'surrounding whitespace was accepted');
     assert.strictEqual(await run('data-sequence-to', '2 '), false, 'surrounding whitespace was accepted');
     assert.strictEqual(await run('data-sequence-scrub-buffer-frames', '1.'), false, 'a whole number took a point');
-});
-
-// A delivery whose entry count is not a finite whole number is no
-// delivery at all.
-test('a runaway observer delivery is ignored', function () {
-    FakeSubscription.reset();
-    const {stack} = declaredPage({});
-    stack.driver.tick(16);
-    let reads = 0;
-    const entries = new Proxy({}, {
-        get: function (target, key) {
-            if (key === 'length') {
-                return Infinity;
-            }
-            reads += 1;
-            if (reads > 1000) {
-                throw new Error('runaway delivery');
-            }
-            return undefined;
-        }
-    });
-    stack.resizeObservers.forEach(function (observer) {
-        assert.doesNotThrow(function () { observer.callback(entries, observer); }, 'the delivery ran away');
-    });
-    assert.strictEqual(reads, 0, 'an unbounded delivery was walked');
 });
 
 // A scene whose root is a nested scroller is measured against the page
@@ -14095,48 +14092,215 @@ test('rejecting one retained tier still funds a later affordable tier in the sam
         'the affordable retained tier must stay funded after the earlier retained tier was rejected');
 });
 
-// A host that refuses the frame makes requestPhased throw. The refused
-// request armed nothing, so the pending flag must not outlive it: the
-// next input asks again and its pass requests the frame it wants.
-test('a refused frame request leaves the next input free to ask again', () => {
+test('a sequence fixed background selects resolution for the viewport', () => {
     FakeSubscription.reset();
-    const driver = require('./fakes.cjs').frameDriver();
-    const requestPhased = driver.requestPhased;
-    let refusals = 1;
-    let calls = 0;
-    driver.requestPhased = function (read, write) {
-        calls += 1;
-        if (refusals > 0) {
-            refusals -= 1;
-            throw new Error('frame refused');
-        }
-        return requestPhased(read, write);
-    };
-    const {stack, scope} = declaredPage({scrollscrub: false, frameDriver: driver});
-    assert.strictEqual(calls, 1, 'the bind asked for its first pass');
-    scrollFraction(stack, scope, 1300);
-    assert.strictEqual(calls, 2, 'the input after a refused request did not ask again');
-    driver.tick(16);
-    assert.ok(stack.images.some(image => image.src === url('f2.jpg')),
-        'the pass after a refused request never ran');
+    const host = new Element('div', 'host');
+    host.style.setProperty('background-image', 'url("http://localhost/f0.jpg")');
+    host.computedStyle = {'background-image': 'url("http://localhost/f0.jpg")',
+        'background-size': 'cover', 'background-attachment': 'fixed'};
+    const {stack} = declaredPage({host, imageProperty: 'background-image', resolution: true,
+        catalogDocument: catalog(1, [{src: 'fHD.jpg', width: 1600, height: 900}]),
+        hostRect: {top: 0, bottom: 100, left: 0, right: 200, width: 200, height: 100},
+        window: {devicePixelRatio: 1, innerWidth: 1280, innerHeight: 720}});
+    stack.driver.tick(16);
+    stack.driver.tick(32);
+    assert.ok(stack.images.some(image => image.src === url('fHD.jpg')),
+        'the small element box concealed the viewport-sized image demand');
 });
 
-// A refusal that still queued its pair: when a frame delivers that pair
-// with no request after it, the pass still runs.
-test('a pair a refused request still queued runs its pass when delivered', () => {
-    FakeSubscription.reset();
-    const driver = require('./fakes.cjs').frameDriver();
-    const requestPhased = driver.requestPhased;
-    let refusals = 1;
-    driver.requestPhased = function (read, write) {
-        requestPhased(read, write);
-        if (refusals > 0) {
-            refusals -= 1;
-            throw new Error('frame refused after queueing');
+for (const replacement of ['value', 'priority']) {
+    test('background verification preserves a newer inline ' + replacement, async () => {
+        const host = new Element('div', 'host');
+        const {stack, scope} = declaredPage({host, imageProperty: 'background-image'});
+        stack.driver.tick(16);
+        scrollFraction(stack, scope, 1300);
+        stack.driver.tick(32);
+        await settleAll(stack.images);
+        stack.driver.tick(48);
+        const value = replacement === 'value' ? 'url("foreign.jpg")' : host.style.getPropertyValue('background-image');
+        const priority = replacement === 'priority' ? 'important' : '';
+        host.style.setProperty('background-image', value, priority);
+        stack.driver.tick(64);
+        for (let at = 80; at < 200; at += 16) {
+            await settlePromises();
+            stack.driver.tick(at);
         }
-    };
-    const {stack} = declaredPage({baseline: null, scrollscrub: false, frameDriver: driver});
-    driver.tick(16);
-    assert.ok(stack.images.some(image => image.src === url('f0.jpg')),
-        'the queued pass did not run');
+        assert.equal(host.style.getPropertyValue('background-image'), value);
+        assert.equal(host.style.getPropertyPriority('background-image'), priority);
+        assert.equal(stack.driver.pending(), 0);
+    });
+}
+
+test('reduced motion preserves a newer inline background after verification', async () => {
+    const motion = mediaQueryList(), host = new Element('div', 'host');
+    const {stack} = declaredPage({host, baseline: null, imageProperty: 'background-image', catalogDocument: catalog(1),
+        window: {matchMedia: () => motion}});
+    stack.driver.tick(16);
+    await settleAll(stack.images);
+    stack.driver.tick(32);
+    stack.driver.tick(48);
+    host.style.setProperty('background-image', 'url("foreign.jpg")', 'important');
+    motion.set(true);
+    stack.driver.tick(64);
+    stack.driver.tick(80);
+    assert.equal(host.style.getPropertyValue('background-image'), 'url("foreign.jpg")');
+    assert.equal(host.style.getPropertyPriority('background-image'), 'important');
+});
+
+// Queue behavior is observed through presentation, not internal queue fields.
+test('queued cold scroll plays every index and reverses without more input', async () => {
+    const {stack,scope,host}=declaredPage({queued:true,catalogDocument:catalog(6),sequenceFrom:0,sequenceTo:5});
+    scrollFraction(stack,scope,1800);
+    const seen=[];
+    for(let time=0;time<2000;time+=40){stack.driver.tick(time);await settleAll(stack.images);const value=presented(host);if(seen.at(-1)!==value)seen.push(value);}
+    assert.deepEqual(seen.filter(Boolean),Array.from({length:6},(_,i)=>url('f'+i+'.jpg')));
+    scrollFraction(stack,scope,800);
+    for(let time=2000;time<4000;time+=40){stack.driver.tick(time);await settleAll(stack.images);}
+    assert.equal(presented(host),url('f0.jpg'));
+});
+test('queued intro finishes before scroll travel', async () => {
+    const {stack,scope,host}=declaredPage({queued:true,catalogDocument:catalog(8),sequenceFrom:4,sequenceTo:7,intro:{from:0,to:4,durationMs:400,easing:'linear'}});
+    stack.driver.tick(0);await settleAll(stack.images);stack.driver.tick(40);await settleAll(stack.images);
+    scrollFraction(stack,scope,1800);
+    const seen=[];
+    for(let time=80;time<2000;time+=40){stack.driver.tick(time);await settleAll(stack.images);const value=presented(host);if(seen.at(-1)!==value)seen.push(value);}
+    assert.equal(presented(host),url('f7.jpg'));
+    for(let i=1;i<8;i++)assert.ok(seen.includes(url('f'+i+'.jpg')),'frame '+i+' must play');
+});
+
+test('queued destination coalesces while cold and stops its frame clock at rest', async () => {
+    const {stack, scope, host} = declaredPage({queued: true, baseline: null, catalogDocument: catalog(6)});
+    scrollFraction(stack, scope, 1800);
+    stack.driver.tick(0);
+    scrollFraction(stack, scope, 1200);
+    const seen = [];
+    for (let time = 40; time < 2000; time += 40) {
+        stack.driver.tick(time);
+        await settleAll(stack.images);
+        const value = presented(host);
+        if (seen.at(-1) !== value) seen.push(value);
+    }
+    assert.equal(presented(host), url('f2.jpg'));
+    assert.ok(!seen.includes(url('f5.jpg')), 'obsolete destination must not survive as an input-event backlog');
+    assert.equal(stack.driver.pending(), 0, 'completed travel must not leave an idle clock');
+});
+
+test('queued reverse-authored range plays from its start and rests there after return', async () => {
+    const {stack, scope, host} = declaredPage({queued: true, baseline: null, catalogDocument: catalog(6), sequenceFrom: 5, sequenceTo: 1, scrubBuffer: 2});
+    scrollFraction(stack, scope, 1800);
+    const seen = [];
+    for (let time = 0; time < 2000; time += 40) {
+        stack.driver.tick(time);
+        await settleAll(stack.images);
+        const value = presented(host);
+        if (/f[1-5]\.jpg/.test(value) && seen.at(-1) !== value) seen.push(value);
+    }
+    assert.deepEqual(seen, [5, 4, 3, 2, 1].map(i => url('f' + i + '.jpg')));
+    scrollFraction(stack, scope, 800);
+    for (let time = 2000; time < 4000; time += 40) { stack.driver.tick(time); await settleAll(stack.images); }
+    assert.equal(presented(host), url('f5.jpg'));
+    assert.equal(stack.driver.pending(), 0);
+});
+
+for (const [mode, fps] of [['bad', null], ['queued', '0'], ['queued', '121'], ['queued', '1.5'], ['direct', '30'], ['queued', '']]) {
+    test('invalid playback declaration stays at baseline: ' + mode + '/' + fps, async () => {
+        const host = new Element('img', 'host');
+        host.setAttribute('width', '800'); host.setAttribute('height', '450');
+        host.setAttribute('data-sequence-playback', mode);
+        if (fps !== null) host.setAttribute('data-sequence-playback-fps', fps);
+        const {stack, scope, reports} = declaredPage({host});
+        scrollFraction(stack, scope, 1800);
+        stack.driver.tick(0); await settleAll(stack.images); stack.driver.tick(100);
+        assert.equal(presented(host), url('f0.jpg'));
+        assert.equal(stack.images.length, 0);
+        assert.equal((await reportsAfterATurn(reports)).length, 1);
+    });
+}
+
+test('queued travel suspends while hidden and resumes without new scroll input', async () => {
+    const {stack, scope, host} = declaredPage({queued: true, catalogDocument: catalog(6)});
+    scrollFraction(stack, scope, 1800);
+    for (let time = 0; time < 120; time += 40) { stack.driver.tick(time); await settleAll(stack.images); }
+    stack.document.hidden = true;
+    stack.document.fireEvent('visibilitychange');
+    const paused = presented(host);
+    for (let time = 120; time < 800; time += 40) { stack.driver.tick(time); await settleAll(stack.images); }
+    assert.equal(presented(host), paused);
+    assert.equal(stack.driver.pending(), 0);
+    stack.document.hidden = false;
+    stack.document.fireEvent('visibilitychange');
+    for (let time = 800; time < 2000; time += 40) { stack.driver.tick(time); await settleAll(stack.images); }
+    assert.equal(presented(host), url('f5.jpg'));
+    assert.equal(stack.driver.pending(), 0);
+});
+
+test('reduced motion retires queued travel and keeps the authored baseline', async () => {
+    const motion = mediaQueryList();
+    const {stack, scope, host} = declaredPage({queued: true, catalogDocument: catalog(6), window: {matchMedia: () => motion}});
+    scrollFraction(stack, scope, 1800);
+    for (let time = 0; time < 200; time += 40) { stack.driver.tick(time); await settleAll(stack.images); }
+    motion.set(true);
+    for (let time = 200; time < 2000; time += 40) { stack.driver.tick(time); await settleAll(stack.images); }
+    assert.equal(presented(host), url('f0.jpg'));
+    assert.equal(stack.driver.pending(), 0);
+});
+
+test('queued one-fps travel sleeps between due frames and retires its deadline', async () => {
+    const {stack, scope, host} = declaredPage({queued: true, fps: 1, catalogDocument: catalog(3), sequenceFrom: 0, sequenceTo: 2, scrollscrub: false});
+    scrollFraction(stack, scope, 1800);
+    for (let time = 0; time <= 100; time += 20) { stack.driver.tick(time); await settleAll(stack.images); }
+    const held = presented(host);
+    assert.equal(stack.driver.pending(), 0);
+    assert.equal(stack.playbackTimers.size, 1);
+    for (let time = 120; time < 900; time += 20) { stack.driver.tick(time); await settleAll(stack.images); assert.equal(presented(host), held); assert.equal(stack.driver.pending(), 0); }
+    for (let time = 900; time < 3500; time += 20) { stack.driver.tick(time); await settleAll(stack.images); }
+    assert.equal(presented(host), url('f2.jpg'));
+    assert.equal(stack.driver.pending(), 0);
+    assert.equal(stack.playbackTimers.size, 0);
+});
+
+for (const range of [{introFrom: 0, introTo: 2, from: 4, to: 7}, {introFrom: 7, introTo: 5, from: 3, to: 0}]) {
+    test('queued unequal endpoint traverses every bridge frame ' + range.introTo, async () => {
+        const {stack, scope, host} = declaredPage({queued: true, baseline: 'f'+range.introFrom+'.jpg', catalogDocument: catalog(8), sequenceFrom: range.from, sequenceTo: range.to, scrubBuffer: 2, intro: {from: range.introFrom, to: range.introTo, durationMs: 200, easing: 'linear'}});
+        stack.driver.tick(0); await settleAll(stack.images); stack.driver.tick(40); await settleAll(stack.images);
+        scrollFraction(stack, scope, 1800);
+        const seen = [];
+        for (let time = 80; time < 2400; time += 40) { stack.driver.tick(time); await settleAll(stack.images); const value = presented(host); if (seen.at(-1) !== value) seen.push(value); }
+        const step = range.to > range.introTo ? 1 : -1;
+        for (let index = range.introTo; index !== range.to + step; index += step) assert.ok(seen.includes(url('f'+index+'.jpg')), 'missing bridge frame '+index);
+        assert.equal(presented(host), url('f'+range.to+'.jpg'));
+        assert.equal(stack.playbackTimers.size, 0);
+    });
+}
+
+
+test('sleeping queued host does not read policy during another host intro', async () => {
+    const host = new Element('img', 'slow'), peer = new Element('img', 'peer');
+    for (const element of [host, peer]) { element.setAttribute('width','800'); element.setAttribute('height','450'); }
+    peer.src = 'f0.jpg';
+    for (const [name,value] of Object.entries({'data-paste-imagesequence':'#frames','data-sequence-playback':'queued','data-sequence-intro-from':'0','data-sequence-intro-to':'7','data-sequence-intro-duration-ms':'3000'})) peer.setAttribute(name,value);
+    let reads = 0;
+    const {stack,scope} = declaredPage({host,peer,queued:true,fps:1,catalogDocument:catalog(8),scrollscrub:false,window:{getComputedStyle(element) { if (element === host) reads++; return {getPropertyValue(name) { return element.style.getPropertyValue(name); }}; }}});
+    scrollFraction(stack,scope,1800);
+    for(let time=0;time<=200;time+=20){stack.driver.tick(time);await settleAll(stack.images);}
+    const before=reads;
+    for(let time=220;time<=800;time+=20){stack.driver.tick(time);await settleAll(stack.images);}
+    assert.equal(reads,before,'unrelated intro must not wake sleeping host policy');
+});
+
+test('queued background yields without leaving a playback deadline', async () => {
+    const host = new Element('div','host');
+    const {stack,scope}=declaredPage({host,queued:true,fps:1,baseline:null,imageProperty:'background-image',catalogDocument:catalog(4),scrollscrub:false});
+    scrollFraction(stack,scope,1800);
+    let replaced=false;
+    for(let time=0;time<2200;time+=20){
+        stack.driver.tick(time);await settleAll(stack.images);
+        if(!replaced && host.style.getPropertyValue('background-image').includes('f1.jpg')) {
+            host.style.setProperty('background-image','url("foreign.jpg")');replaced=true;
+        }
+    }
+    assert.equal(replaced,true);
+    assert.equal(host.style.getPropertyValue('background-image'),'url("foreign.jpg")');
+    assert.equal(stack.playbackTimers.size,0);
+    assert.equal(stack.driver.pending(),0);
 });

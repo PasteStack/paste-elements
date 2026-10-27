@@ -324,8 +324,7 @@ test('each module keeps one armed phased frame through a scroll and resize burst
     assert.equal(driver.pending(), 1, 'the modules did not share one host frame');
 });
 
-// The rest of the page's frame users: a sticky nav, a scroll spy and an
-// autogrowing field, each over the same document, window and real
+// The remaining frame users share the same document, window and real
 // animation-frame module. Every write a module makes is stamped with
 // the host frame that made it.
 function loadFrameUsers(stack, driver, writes) {
@@ -334,45 +333,19 @@ function loadFrameUsers(stack, driver, writes) {
     const stamp = name => { writes.push({module: name, frame: driver.frame()}); };
     // Document coordinates: the fixture's boxes do not move with scroll.
     const bounds = el => ({top: el.docTop, height: el.docHeight});
-    const bodyClasses = new Set();
-    const body = {classList: {
-        add: c => { stamp('stickynav'); bodyClasses.add(c); },
-        remove: c => { stamp('stickynav'); bodyClasses.delete(c); },
-        contains: c => bodyClasses.has(c)
-    }};
-
-    const navWrap = new Element('div', '_paste_ui_nav_wrap');
-    navWrap.docTop = 0;
-    navWrap.docHeight = 50;
-    const stickyParent = new Element('div', 'stickyparent');
-    stickyParent.docTop = 0;
-    stickyParent.docHeight = 2000;
-    const above = new Element('div', 'above');
-    above.docTop = 0;
-    above.docHeight = 1000;
-    const sticky = new Element('div', 'sticky');
-    sticky.className = 'sticky-nav-target';
-    sticky.docTop = 1000;
-    sticky.docHeight = 40;
-    sticky.previousElementSibling = above;
-    stickyParent.appendChild(above);
-    stickyParent.appendChild(sticky);
-    doc.body.appendChild(navWrap);
-    doc.body.appendChild(stickyParent);
+    const sticky = new Element('nav', 'sticky');
+    sticky.setAttribute('data-paste-sticky-nav', '#above');
+    sticky.classList = {add: () => stamp('stickynav'), remove: () => stamp('stickynav')};
+    const above = new Element('section', 'above');
+    above.getBoundingClientRect = () => ({bottom: 1000 - win.pageYOffset});
+    above.getClientRects = () => [{}];
     const navDom = {
-        querySelector: sel => (sel === '.sticky-nav-target' ? sticky : null),
-        getDocumentBody: () => body,
-        getScrollTop: () => win.pageYOffset,
-        getViewportWidth: () => 1200,
-        Bounds: {fromElement: bounds}
+        get: () => [sticky], querySelector: () => above, getViewportWidth: () => 1200
     };
     loadModule({
-        file: 'paste/ui/stickynav.js',
-        name: 'paste.ui.stickynav',
-        deps: ['paste.dom', 'paste.event', 'paste.has', 'paste.ui.utilities.animation-frame'],
-        impls: [navDom, eventModule, {touch: false}, driver],
-        sharedDocument: doc,
-        sharedWindow: win
+        file: 'paste/ui/stickynav.js', name: 'paste.ui.stickynav',
+        deps: ['paste.dom', 'paste.event', 'paste.ui.utilities.animation-frame'],
+        impls: [navDom, eventModule, driver], sharedDocument: doc, sharedWindow: win
     });
 
     const spyNav = new Element('nav', 'spynav');
@@ -410,25 +383,7 @@ function loadFrameUsers(stack, driver, writes) {
         sharedWindow: win
     });
 
-    const field = new Element('textarea', 'field');
-    field.setAttribute('data-paste-autogrow', '');
-    field.clientHeight = 40;
-    field.scrollHeight = 40;
-    let height = '';
-    Object.defineProperty(field.style, 'height', {
-        get: () => height,
-        set: value => { stamp('autogrow'); height = value; }
-    });
-    doc.body.appendChild(field);
-    loadModule({
-        file: 'paste/ui/autogrow.js',
-        name: 'paste.ui.autogrow',
-        deps: ['paste.dom', 'paste.event', 'paste.ui.utilities.animation-frame'],
-        impls: [{get: () => [field]}, eventModule, driver],
-        sharedDocument: doc,
-        sharedWindow: win
-    });
-    return {field, sticky};
+    return {sticky};
 }
 
 test('every frame user writes its answer to one input in the same host frame, on the shared batch', async () => {
@@ -462,7 +417,7 @@ test('every frame user writes its answer to one input in the same host frame, on
         frameDriver: driver
     });
     loadHeroscroll(stack, driver);
-    const users = loadFrameUsers(stack, driver, writes);
+    loadFrameUsers(stack, driver, writes);
     // Writes to the scrub scope, the sequence host and the hero image.
     [['scrollscrub', places.scope], ['imagesequence', places.host], ['heroscroll', places.heroImage]]
         .forEach(([name, el]) => {
@@ -498,10 +453,8 @@ test('every frame user writes its answer to one input in the same host frame, on
     writes.length = 0;
 
     // One input: the page scrolls past the sticky threshold and into the
-    // next spied section while the field's content grows.
+    // next spied section. Autogrow is intentionally a direct input handler.
     scrollTo(1040);
-    users.field.scrollHeight = 80;
-    users.field.fireEvent('input');
     assert.equal(driver.pending(), 1, 'the modules armed ' + driver.pending() + ' host frames');
     assert.deepEqual(writes, [], 'a module wrote outside the frame: ' + JSON.stringify(writes));
     const answering = frame + 1;
@@ -522,11 +475,11 @@ test('every frame user writes its answer to one input in the same host frame, on
             late.add(entry.module);
         }
     });
-    ['stickynav', 'scrollspy', 'autogrow', 'scrollscrub', 'imagesequence', 'heroscroll'].forEach(name => {
+    ['stickynav', 'scrollspy', 'scrollscrub', 'imagesequence', 'heroscroll'].forEach(name => {
         assert.ok(byModule[name] && byModule[name].indexOf(answering) >= 0,
             name + ' did not write in the answering frame: ' + JSON.stringify(byModule));
     });
-    ['stickynav', 'scrollspy', 'autogrow'].forEach(name => {
+    ['stickynav', 'scrollspy'].forEach(name => {
         assert.equal(late.has(name), false,
             name + ' deferred a write past the answering frame: ' + JSON.stringify(byModule));
     });

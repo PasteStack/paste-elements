@@ -3,12 +3,6 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const {readModuleSource, loadModule} = require('./fakes.cjs');
 
-// The heroscroll contract: no '.paste-ui-hero' markup means no feature
-// — no listeners and no work. Scroll-driven opacity and parallax are
-// motion effects the module owns, so a reduced-motion preference
-// retires them: while the preference holds, the module writes nothing,
-// and a mid-session change restores whatever the stylesheet authored.
-
 function fixture(options = {}) {
     const listeners = {};
     const timers = [];
@@ -221,13 +215,12 @@ function fixture(options = {}) {
             }
         }
     };
-    // Session history as a hero click may write it: each pushState is
-    // recorded with how many scrolls preceded it.
+    // Navigation probes: an effect must never write a history entry or
+    // request a navigation scroll, even with a retired declaration.
     const pushes = [];
     const history = {
-        state: options.historyState === undefined ? null : options.historyState,
+        state: null,
         pushState(state, title, url) {
-            if (options.historyRefuses) { throw new Error('SecurityError'); }
             pushes.push({state, title, args: arguments.length, url, scrolledBefore: scrolled.length});
         }
     };
@@ -266,12 +259,7 @@ function fixture(options = {}) {
         // Loaded unless a test defines the module mid-load.
         readyState: options.readyState || 'complete',
         body: bodyEl,
-        getElementsByTagName: tag => tag === 'a' ? (options.named || []).filter(n => n.nodeName === 'A') : [bodyEl],
-        compatMode: options.quirks ? 'BackCompat' : 'CSS1Compat',
-        // The fragment lookup a hero's own entry consults: ids of heroes
-        // and of any other elements a test plants, and named elements.
-        getElementById: id => byId[id] || (options.elementIds || []).includes(id) ? {id} : null,
-        getElementsByName: name => (options.named || []).filter(n => n.name === name)
+        getElementsByTagName: () => [bodyEl]
     };
 
     const exports = {};
@@ -910,268 +898,6 @@ test('heroes without an id are never stamped with one', () => {
     assert.equal(f.heroes[1].id, '', 'the second hero was given a generated id');
 });
 
-test('a hash click navigates to the next hero\'s fragment', () => {
-    const f = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h2', top: 600, height: 600}
-    ]});
-    const prevented = f.clickHero(f.heroes[0]);
-    assert.equal(prevented, true, 'the hero click was not claimed');
-    assert.deepEqual(f.navigations, ['#h2'], 'the click did not navigate to the next hero\'s fragment');
-    assert.equal(f.scrolled.length, 0, 'a fragment navigation also requested its own scroll');
-    assert.equal(f.fired.length, 0, 'the module fired an event of its own');
-});
-
-test('a hash click to the fragment already current scrolls the next hero into view', () => {
-    const f = fixture({hash: '#h2', heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h2', top: 600, height: 600}
-    ]});
-    assert.equal(f.clickHero(f.heroes[0]), true);
-    assert.deepEqual(f.navigations, [], 'the hash setter cannot navigate to the current fragment');
-    assert.equal(f.scrolled.length, 1, 'nothing moved the visitor to the next hero');
-    assert.equal(f.scrolled[0].el, f.heroes[1]);
-    assert.deepEqual(f.scrolled[0].args, [], 'the scroll overrode the page\'s scroll CSS');
-});
-
-test('a hash click whose next hero has no id scrolls it into view', () => {
-    const f = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: '', top: 600, height: 600}
-    ]});
-    assert.equal(f.clickHero(f.heroes[0]), true, 'the click to an unnamed hero was not claimed');
-    assert.deepEqual(f.navigations, [], 'the address changed for a hero with no fragment');
-    assert.equal(f.location.hash, '');
-    assert.equal(f.scrolled.length, 1);
-    assert.equal(f.scrolled[0].el, f.heroes[1]);
-    assert.equal(f.heroes[1].id, '', 'the hero was given a generated id');
-});
-
-// A hero with no id has no fragment, so its scroll gets an entry of its
-// own at the unchanged address, written before the scroll: the entry
-// the visitor leaves keeps the position it had, and Back returns to it.
-test('a hash click to a hero with no id adds a history entry before it scrolls', () => {
-    const state = {route: 'kept'};
-    const f = fixture({historyState: state, heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: '', top: 600, height: 600}
-    ]});
-    assert.equal(f.clickHero(f.heroes[0]), true);
-    assert.equal(f.pushes.length, 1, 'the unnamed hero got no history entry of its own');
-    assert.equal(f.pushes[0].state, state, 'the entry dropped the page\'s history state');
-    assert.equal(f.pushes[0].url, 'https://www.test.local/page?q=1', 'the entry must keep the current address');
-    assert.equal(f.pushes[0].scrolledBefore, 0, 'the entry was written after the scroll it should hold');
-    assert.equal(f.scrolled.length, 1);
-    assert.equal(f.scrolled[0].el, f.heroes[1]);
-    assert.deepEqual(f.navigations, []);
-});
-
-// The entry for a hero with no id shows that hero. A fragment that names
-// an element — the hero being left, any other id, an a element's name —
-// or the top of the document becomes the empty fragment: the address no
-// longer names what the entry does not show, and an engine that scrolls
-// to an entry's fragment on traversal shows the hero. Other fragments,
-// such as multistate tokens, stay, and the '#' always does when present.
-test('the entry for a hero with no id empties a fragment that names an element', () => {
-    const base = 'https://www.test.local/page?q=1';
-    const heroes = id => [
-        {id, top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: '', top: 600, height: 600}
-    ];
-    const cases = [
-        {label: 'the hero being left', hash: '#h2', heroId: 'h2', url: base + '#'},
-        {label: 'an encoded hero id', hash: '#caf%C3%A9', heroId: 'café', url: base + '#'},
-        {label: 'another element', hash: '#contact', elementIds: ['contact'], url: base + '#'},
-        {label: 'an a element\'s name', hash: '#legacy', named: [{name: 'legacy', nodeName: 'A'}], url: base + '#'},
-        {label: 'a named form control', hash: '#field', named: [{name: 'field', nodeName: 'INPUT'}], url: base + '#field'},
-        {label: 'a quirks-mode name differing in case', hash: '#contact', quirks: true,
-            named: [{name: 'Contact', nodeName: 'A', getAttribute: () => 'Contact'}], url: base + '#'},
-        {label: 'a quirks-mode name differing by the long s', hash: '#SECTION', quirks: true,
-            named: [{name: '\u017Fection', nodeName: 'A', getAttribute: () => '\u017Fection'}], url: base + '#'},
-        {label: 'a quirks-mode name that folds by final sigma', hash: '#%CE%A3', quirks: true,
-            named: [{name: '\u03C2', nodeName: 'A', getAttribute: () => '\u03C2'}], url: base + '#'},
-        {label: 'a quirks-mode Deseret name folding across a surrogate pair', hash: '#%F0%90%90%80x', quirks: true,
-            named: [{name: '\uD801\uDC28X', nodeName: 'A', getAttribute: () => '\uD801\uDC28X'}], url: base + '#'},
-        {label: 'a lone surrogate, which folds as itself', hash: '#qf', quirks: true,
-            named: [{name: 'QF\uD801', nodeName: 'A', getAttribute: () => 'QF\uD801'}], url: base + '#qf'},
-        {label: 'the dotless i, which does not fold', hash: '#I', quirks: true,
-            named: [{name: '\u0131', nodeName: 'A', getAttribute: () => '\u0131'}], url: base + '#I'},
-        {label: 'a standards-mode name differing in case', hash: '#contact',
-            named: [{name: 'Contact', nodeName: 'A', getAttribute: () => 'Contact'}], url: base + '#contact'},
-        {label: 'the top of the document', hash: '#Top', url: base + '#'},
-        {label: 'a multistate token', hash: '#area1:b', url: base + '#area1:b'},
-        {label: 'a malformed escape', hash: '#%E0%A4%A', url: base + '#%E0%A4%A'},
-        {label: 'the empty fragment', hash: '', emptyFragment: true, url: base + '#'},
-        {label: 'no fragment at all', hash: '', url: base}
-    ];
-    for (const c of cases) {
-        const f = fixture({hash: c.hash, heroes: heroes(c.heroId || 'h1'), elementIds: c.elementIds,
-            named: c.named, emptyFragment: c.emptyFragment, quirks: c.quirks});
-        assert.doesNotThrow(() => f.clickHero(f.heroes[0]), c.label);
-        assert.equal(f.pushes.length, 1, c.label);
-        assert.equal(f.pushes[0].url, c.url, c.label + ': the entry\'s address');
-        assert.equal(f.scrolled.length, 1, c.label);
-    }
-});
-
-// The hero without an id carries the clearance hook only until the next
-// hash click: it is set before the scroll and moves on with each click.
-test('the destination class marks the unnamed hero a hash click scrolled to, until the next click', () => {
-    const f = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: '', top: 600, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: '', top: 1200, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h4', top: 1800, height: 600}
-    ]});
-    const [first, second, third] = f.heroes;
-    second.scrollIntoView = () => f.scrolled.push({el: second, marked: second.classList.contains('paste-ui-hero-destination')});
-    f.clickHero(first);
-    assert.equal(f.scrolled[0].marked, true, 'the class was not set before the scroll');
-    f.clickHero(second);
-    assert.equal(second.classList.contains('paste-ui-hero-destination'), false, 'the class stayed on a hero left behind');
-    assert.equal(third.classList.contains('paste-ui-hero-destination'), true, 'the next unnamed hero was not marked');
-    f.clickHero(third);
-    assert.equal(third.classList.contains('paste-ui-hero-destination'), false, 'a click to a hero with an id left the mark');
-    assert.equal(f.heroes[3].classList.contains('paste-ui-hero-destination'), false, 'a fragment target was marked');
-    assert.deepEqual(f.navigations, ['#h4']);
-});
-
-test('a hero with an id, or the fragment already current, adds no entry of the module\'s own', () => {
-    const named = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h2', top: 600, height: 600}
-    ]});
-    named.clickHero(named.heroes[0]);
-    assert.equal(named.pushes.length, 0, 'a fragment navigation also pushed an entry');
-    const current = fixture({hash: '#h2', heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h2', top: 600, height: 600}
-    ]});
-    current.clickHero(current.heroes[0]);
-    assert.equal(current.pushes.length, 0, 'the fragment already current pushed an entry');
-    assert.equal(current.scrolled.length, 1);
-});
-
-test('a history that refuses the entry still scrolls to the hero with no id', () => {
-    const f = fixture({historyRefuses: true, heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: '', top: 600, height: 600}
-    ]});
-    assert.doesNotThrow(() => f.clickHero(f.heroes[0]));
-    assert.equal(f.scrolled.length, 1, 'a refused entry stopped the scroll');
-});
-
-test('a hash click without a following hero stays native', () => {
-    const f = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}}
-    ]});
-    assert.equal(f.clickHero(f.heroes[0]), false, 'a click was prevented with no next hero');
-    assert.deepEqual(f.navigations, []);
-    assert.equal(f.scrolled.length, 0);
-});
-
-test('the next hero is resolved when the click happens', () => {
-    const f = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h2', top: 600, height: 600}
-    ]});
-    const [first, second] = f.heroes;
-    // A hero inserted after discovery is the one navigated to.
-    const inserted = {id: 'h3', nodeType: 1, isConnected: true, nextElementSibling: second,
-        classList: {contains: c => c === 'paste-ui-hero'}};
-    first.nextElementSibling = inserted;
-    assert.equal(f.clickHero(first), true);
-    assert.deepEqual(f.navigations, ['#h3'], 'the click went to the hero frozen at discovery');
-    // A sibling that is not a hero is not navigated to.
-    first.nextElementSibling = {id: 'x', nodeType: 1, classList: {contains: () => false}};
-    assert.equal(f.clickHero(first), false, 'a click navigated to a sibling that is not a hero');
-    // A detached hero is not navigated to.
-    second.isConnected = false;
-    first.nextElementSibling = second;
-    assert.equal(f.clickHero(first), false, 'a click navigated to a disconnected hero');
-    // An id removed since discovery leaves a scroll, not a fragment.
-    second.isConnected = true;
-    second.id = '';
-    assert.equal(f.clickHero(first), true);
-    assert.deepEqual(f.navigations, ['#h3']);
-    assert.equal(f.scrolled.length, 1);
-    assert.equal(f.scrolled[0].el, second);
-});
-
-test('a click inside an interactive element in the hero is never prevented', () => {
-    const interactiveShapes = {
-        'a link with href': {tagName: 'A', attrs: {href: '/elsewhere'}},
-        'a button': {tagName: 'BUTTON'},
-        'an input': {tagName: 'INPUT'},
-        'a select': {tagName: 'SELECT'},
-        'a textarea': {tagName: 'TEXTAREA'},
-        'a label': {tagName: 'LABEL'},
-        'a summary': {tagName: 'SUMMARY'},
-        'an area with href': {tagName: 'AREA', attrs: {href: '/map'}},
-        'an SVG link with href': {tagName: 'a', attrs: {href: '#s'}},
-        'an SVG link with xlink:href': {tagName: 'a', attrs: {'xlink:href': '#s'}},
-        'an audio with controls': {tagName: 'AUDIO', attrs: {controls: ''}},
-        'a video with controls': {tagName: 'VIDEO', attrs: {controls: ''}},
-        'an iframe': {tagName: 'IFRAME'},
-        'an object': {tagName: 'OBJECT'},
-        'an embed': {tagName: 'EMBED'},
-        'a tabindex element': {tagName: 'DIV', attrs: {tabindex: '0'}},
-        'a contenteditable element': {tagName: 'DIV', attrs: {contenteditable: ''}}
-    };
-    for (const [label, shape] of Object.entries(interactiveShapes)) {
-        const f = fixture({heroes: [
-            {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-            {id: 'h2', top: 600, height: 600}
-        ]});
-        const attrs = shape.attrs || {};
-        const control = {
-            nodeType: 1, tagName: shape.tagName, parentNode: f.heroes[0],
-            hasAttribute: k => Object.prototype.hasOwnProperty.call(attrs, k)
-        };
-        // The click lands on a text-bearing child of the control.
-        const span = {nodeType: 1, tagName: 'SPAN', parentNode: control, hasAttribute: () => false};
-        assert.equal(f.clickHero(f.heroes[0], span), false,
-            label + ': the module prevented a click an interactive element owns');
-        assert.deepEqual(f.navigations, [], label + ': the hero navigated over an interactive click');
-        assert.equal(f.scrolled.length, 0, label + ': the hero scrolled over an interactive click');
-    }
-    // An anchor without href is not interactive: the hero still claims it.
-    const f = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h2', top: 600, height: 600}
-    ]});
-    const bare = {nodeType: 1, tagName: 'A', parentNode: f.heroes[0], hasAttribute: () => false};
-    assert.equal(f.clickHero(f.heroes[0], bare), true, 'a plain anchor without href blocked the hash click');
-    // Media without controls is not interactive either.
-    const g = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h2', top: 600, height: 600}
-    ]});
-    const video = {nodeType: 1, tagName: 'VIDEO', parentNode: g.heroes[0], hasAttribute: () => false};
-    assert.equal(g.clickHero(g.heroes[0], video), true, 'a video without controls blocked the hash click');
-});
-
-test('a control inside a shadow root owns its click through the composed path', () => {
-    const f = fixture({heroes: [
-        {id: 'h1', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'h2', top: 600, height: 600}
-    ]});
-    const hero = f.heroes[0];
-    // Retargeted to the host, the event target is a plain element; the
-    // composed path still names the button inside the shadow root.
-    const host = {nodeType: 1, tagName: 'X-WIDGET', parentNode: hero, hasAttribute: () => false};
-    const shadowRoot = {nodeType: 11};
-    const button = {nodeType: 1, tagName: 'BUTTON', parentNode: shadowRoot, hasAttribute: () => false};
-    assert.equal(f.clickHero(hero, host, [button, shadowRoot, host, hero, {nodeType: 9}]), false,
-        'the module prevented a click a shadow-root button owns');
-    assert.deepEqual(f.navigations, []);
-    assert.equal(f.scrolled.length, 0);
-    // The walk stops at the hero: what lies above it never counts.
-    const above = {nodeType: 1, tagName: 'DIV', hasAttribute: k => k === 'tabindex'};
-    assert.equal(f.clickHero(hero, host, [host, hero, above]), true,
-        'an interactive ancestor above the hero blocked the hash click');
-});
-
 test('a percentage background position is not read as pixels', () => {
     // center → '50% 50%': the parallax base is 0, never 50px.
     const pct = fixture({
@@ -1462,19 +1188,6 @@ test('scrolling after a hero recalibration does not remeasure bounds', () => {
     assert.equal(f.reads.bounds, 0);
 });
 
-test('hash-click traversal passes non-element nodes and respects a deeper control', () => {
-    const f = fixture({heroes: [
-        {id: 'one', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
-        {id: 'two', top: 600, height: 600}
-    ]});
-    const hero = f.heroes[0];
-    const span = {nodeType: 1, tagName: 'SPAN', hasAttribute: () => false};
-    const shadow = {nodeType: 11};
-    const button = {nodeType: 1, tagName: 'BUTTON', hasAttribute: () => false};
-    assert.equal(f.clickHero(hero, span, [span, button, shadow, hero]), false);
-    assert.equal(f.clickHero(hero, span, [span, shadow, hero]), true);
-});
-
 test('a hero with no content still measures and paints its background', () => {
     const f = fixture({heroes: [{id: 'hero', top: 0, height: 600}],
         scrollTop: 200, arrange(heroes) { heroes[0].content = null; },
@@ -1567,4 +1280,36 @@ test('content above a positive first-hero offset is fully faded', () => {
     ]});
     f.flushFrames();
     assert.equal(f.heroes[1].content.style.opacity, '0');
+});
+
+test('a retired hashclick declaration cannot claim clicks or change navigation', () => {
+    for (const touch of [false, true]) {
+        const f = fixture({touch, hash: '#kept', heroes: [
+            {id: 'one', top: 0, height: 600, attrs: {hero: {'data-hero-hashclick': ''}}},
+            {id: '', top: 600, height: 600}
+        ]});
+        f.flushFrames();
+        assert.equal(f.subscriptions.filter(s => s.type === 'click').length, 0);
+        assert.equal(f.clickHero(f.heroes[0]), false, 'a background click must remain unclaimed');
+        assert.equal(f.location.hash, '#kept');
+        assert.deepEqual(f.navigations, []);
+        assert.deepEqual(f.pushes, []);
+        assert.deepEqual(f.scrolled, []);
+        assert.equal(f.heroes[1].id, '', 'an effect must not invent a navigation target');
+    }
+});
+
+
+test('a fixed image skips background measurement and an imageless hero skips content measurement', () => {
+    const f = fixture({
+        heroes: [
+            {id: 'fixed', top: 0, height: 600, attrs: {image: {'data-hero-image-fixed': ''}}},
+            {id: 'text', top: 600, height: 600}
+        ],
+        arrange(heroes) { heroes[1].image = null; }
+    });
+    assert.equal(f.reads.bounds, 3, 'only two heroes and the image-bearing content need bounds');
+    assert.equal(f.reads.computedStyle, 1, 'only image-bearing content needs style measurement');
+    f.flushFrames();
+    assert.equal(f.heroes[1].content.style.opacity, undefined);
 });

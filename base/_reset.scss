@@ -26,10 +26,12 @@ time, mark, audio, video {
 	vertical-align: baseline;
 }
 
-/* HTML5 display-role reset for older browsers */
+/* Semantic block defaults preserve the native hidden states. */
 article, aside, details, figcaption, figure, 
 footer, header, hgroup, menu, nav, section {
-	display: block;
+	&:where(:not([hidden]), [hidden="until-found" i]) {
+	  display: block;
+	}
 }
 
 ol, ul {

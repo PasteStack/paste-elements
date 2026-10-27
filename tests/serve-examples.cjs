@@ -200,17 +200,23 @@ function serveFile(response, baseDir, requestPath) {
  * 404. A new module is added here when it is added to modules/; the
  * suite fails while a module source has no URL in this table. */
 const uiElements = [
-    'autogrow', 'form', 'heroscroll', 'imagesequence', 'io-reply-fragment-envelope',
+    'select', 'allowed_chars', 'imageupload', 'js_tooltip', 'navigate_on_change', 'prevent_double_submit', 'sortable', 'update_text_on_input_change',
+    'fragment_navigation', 'autogrow', 'lazy_loader', 'carousel', 'heroscroll', 'imagesequence',
     'marquee', 'multistate', 'progressiveresolution', 'scrollscrub', 'scrollspy',
-    'smoothscroll', 'stickynav'
+    'stickynav', 'smoothscroll'
 ];
-const uiUtilities = ['animation-frame', 'imageresolution', 'mediaquery', 'scrollrange', 'throttle'];
+const uiUtilities = ['io-html-fragment', 'form-dom', 'animation-frame', 'imageresolution', 'mediaquery', 'scrollrange', 'throttle'];
 const uiModuleUrls = routeTable({});
 uiElements.forEach(function (name) {
     uiModuleUrls['/js/paste/ui/' + name + '.js'] = name + '/' + name + '.js';
 });
 uiUtilities.forEach(function (name) {
     uiModuleUrls['/js/paste/ui/utilities/' + name + '.js'] = 'utilities/' + name + '/' + name + '.js';
+});
+
+const uiForms = ['form_validity', 'form_apply', 'form_html', 'form_autosave'];
+uiForms.forEach(function (name) {
+    uiModuleUrls['/js/paste/ui/form/' + name + '.js'] = 'form/' + name + '/' + name + '.js';
 });
 
 /* One resolution for every /js/ URL — the identity digests below must
@@ -242,6 +248,17 @@ function serveResolved(response, resolved) {
  * requests would serve; serve-examples.test.cjs keeps this list equal to
  * the script srcs those pages declare. */
 const identityPaths = [
+    '/js/paste/ui/fragment_navigation.js',
+    '/js/paste/ui/allowed_chars.js',
+    '/js/paste/ui/select.js',
+    '/js/paste/ui/form/form_autosave.js',
+    '/js/paste/ui/imageupload.js',
+    '/js/paste/ui/js_tooltip.js',
+    '/js/paste/ui/navigate_on_change.js',
+    '/js/paste/ui/prevent_double_submit.js',
+    '/js/paste/ui/sortable.js',
+    '/js/paste/ui/update_text_on_input_change.js',
+
     '/js/paste/paste.js',
     '/js/paste/guid.js',
     '/js/paste/util.js',
@@ -259,10 +276,9 @@ const identityPaths = [
     '/js/paste/ui/scrollscrub.js',
     '/js/paste/ui/progressiveresolution.js',
     '/js/paste/ui/imagesequence.js',
-    '/js/paste/ui/smoothscroll.js',
     '/js/paste/ui/multistate.js',
-    '/js/paste/ui/autogrow.js',
-    '/js/paste/io.js', '/js/paste/ui/form.js', '/js/paste/ui/scrollspy.js'
+    '/js/paste/ui/autogrow.js', '/js/paste/ui/smoothscroll.js',
+    '/js/paste/io.js', '/js/paste/ui/utilities/form-dom.js', '/js/paste/ui/utilities/io-html-fragment.js', '/js/paste/ui/form/form_validity.js', '/js/paste/ui/form/form_apply.js', '/js/paste/ui/form/form_html.js', '/js/paste/ui/lazy_loader.js', '/js/paste/ui/carousel.js', '/js/paste/ui/scrollspy.js'
 ];
 
 /* The routed path is the request target exactly as the client wrote it,
@@ -317,6 +333,27 @@ const server = http.createServer(function (request, response) {
     }
     if (pathname === null) {
         send(response, 404, 'not found', 'text/plain');
+        return;
+    }
+
+    if (pathname === '/checks/echo-upload' && request.method === 'POST') {
+        // Observe the browser's actual multipart bytes: some Playwright
+        // engines omit file bodies from Request.postData(). Loopback only.
+        const chunks = [];
+        let bytes = 0;
+        request.on('data', chunk => {
+            bytes += chunk.length;
+            if (bytes <= 1048576) chunks.push(chunk);
+        });
+        request.on('end', () => {
+            if (bytes > 1048576) {
+                send(response, 413, 'fixture upload too large', 'text/plain');
+                return;
+            }
+            send(response, 200, JSON.stringify({meta:{code:200},data:'photo-20x20.png',
+                wire:{body:Buffer.concat(chunks).toString('latin1'),contentType:request.headers['content-type']}}),
+                'application/json');
+        });
         return;
     }
 

@@ -13,9 +13,7 @@
             --sub-nav-height: 3.5rem;
         }
         body { margin: 0; font-family: sans-serif; }
-        /* The module sticks the nav when the page has scrolled to the
-           nav's slot less this wrapper's height, so the wrapper is a
-           header that stays at the top of the viewport. */
+        /* The page owns its header and the nav's fixed offset. */
         #_paste_ui_nav_wrap {
             position: sticky;
             top: 0;
@@ -53,10 +51,8 @@
         }
         .sticky-nav-target a { color: #333; text-decoration: none; }
         .sticky-nav-target a:hover { color: #667eea; }
-        /* The module only toggles the paste-fixed-subnav body class on the
-           stick and unstick transitions; presenting the stuck state is the
-           page's CSS. The module never clones or moves authored content. */
-        .paste-fixed-subnav .sticky-nav-target {
+        /* A declared target controls this nav's class. CSS owns its position. */
+        .sticky-nav-target.paste-ui-sticky-active {
             position: fixed;
             top: var(--site-nav-height);
             left: 0;
@@ -65,7 +61,7 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .fixed-nav-content { display: none; }
-        .paste-fixed-subnav .fixed-nav-content { display: inline; margin-left: auto; }
+        .paste-ui-sticky-active .fixed-nav-content { display: inline; margin-left: auto; }
         section { min-height: 60vh; padding: 2rem; }
     </style>
 </head>
@@ -77,12 +73,12 @@
         </nav>
     </div>
 
-    <div class="hero">
+    <div class="hero" data-paste-sticky-target>
         <h1>Sticky Nav Demo</h1>
     </div>
 
     <div class="sticky-nav-slot">
-        <nav class="sticky-nav-target" aria-label="Sections">
+        <nav class="sticky-nav-target" data-paste-sticky-nav aria-label="Sections">
             <a href="#section1">Section 1</a>
             <a href="#section2">Section 2</a>
             <a href="#section3">Section 3</a>
@@ -90,7 +86,7 @@
         </nav>
     </div>
 
-    <div id="content">
+    <div>
         <section id="section1">
             <h2>Section 1</h2>
             <p>Scroll down to see the navigation become sticky after passing the hero.</p>
@@ -110,7 +106,7 @@
     <!-- Served by tests/serve-examples.cjs: /js/paste/ resolves into the
          paste core named by PASTE_CORE_JS, /js/paste/ui/ into this
          repository's modules/. stickynav declares paste.dom, paste.event,
-         paste.has and the animation-frame utility; paste.dom needs
+         and the animation-frame utility; paste.dom needs
          paste.util and paste.oop, paste.event needs paste.guid. -->
     <script src="/js/paste/paste.js"></script>
     <script src="/js/paste/guid.js"></script>
@@ -118,7 +114,6 @@
     <script src="/js/paste/oop.js"></script>
     <script src="/js/paste/dom.js"></script>
     <script src="/js/paste/event.js"></script>
-    <script src="/js/paste/has.js"></script>
     <script src="/js/paste/ui/utilities/animation-frame.js"></script>
     <script src="/js/paste/ui/stickynav.js"></script>
 </body>

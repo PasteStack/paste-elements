@@ -6,11 +6,8 @@
 // lands, so a fixed or sticky nav does not cover it. auto is the nav's
 // own box — $height plus the width $border-bottom names first — and
 // null leaves targets to the page. The rule is a zero-specificity
-// scroll-margin-top on :where(:target), and on the hero without an id
-// that a data-hero-hashclick click last scrolled to (heroscroll marks
-// it .paste-ui-hero-destination until the next hash click, since it
-// is no target), so any scroll-margin rule the page writes for its
-// targets wins, and the --paste-ui-section-nav-clearance custom
+// scroll-margin-top on :where(:target), so any scroll-margin rule the
+// page writes for its targets wins, and the --paste-ui-section-nav-clearance custom
 // property replaces the value at runtime (for example a site header's
 // height plus the nav's).
 // Browsers read it when they scroll to a fragment: link navigation and
@@ -19,8 +16,8 @@
 // scroll-padding, so a page that clears its chrome with
 // scroll-padding-top sets the custom property to 0px, or passes null,
 // and the clearance is not counted twice. scroll-margin also grows a
-// scroll-snap area: on a page that snaps, the current target and the
-// marked hero may rest the clearance lower than their neighbours, and
+// scroll-snap area: on a page that snaps, the current target may rest
+// the clearance lower than its neighbours, and
 // one whose area outgrows the viewport no longer snaps firmly; other
 // heroes are untouched. A snapping page clears its chrome with
 // scroll-padding-top on the scroller, which moves every snap position
@@ -50,12 +47,12 @@
         $clearance: calc(#{$height} + #{$border-width});
       }
     }
-    :where(:target, .paste-ui-hero-destination) {
+    @at-root :where(:target) {
       scroll-margin-top: var(--paste-ui-section-nav-clearance, #{$clearance});
     }
   }
 
-  .paste-ui-section-nav {
+  & {
     display: none;
     background-color: $background;
     border-bottom: $border-bottom;
@@ -63,120 +60,142 @@
 
     @media (max-width: ($breakpoint - 0.02px)) {
       &.paste-ui-section-nav-disclosure {
+        &:where(:not([hidden]), [hidden="until-found" i]) {
+          display: block;
+        }
+      }
+    }
+
+    @media (min-width: $breakpoint) {
+      &:where(:not([hidden]), [hidden="until-found" i]) {
+        display: block;
+      }
+    }
+  }
+
+  // Internal roles remain the markup contract; the caller owns the root.
+  @at-root :where(#{&}) {
+    .paste-ui-section-nav-items {
+      list-style: none;
+      margin: 0 auto;
+      padding: 0;
+      &:where(:not([hidden]), [hidden="until-found" i]) {
+        display: flex;
+      }
+      align-items: center;
+      height: $height;
+      max-width: $max-width;
+    }
+
+    .paste-ui-section-nav-item {
+      > .paste-ui-section-nav-link {
+        &:where(:not([hidden]), [hidden="until-found" i]) {
+          display: block;
+        }
+        padding: $link-padding;
+        color: $link-color;
+        font-size: $font-size;
+        text-decoration: none;
+        transition: color 0.15s ease-in-out;
+
+        &:hover {
+          color: $link-hover-color;
+        }
+      }
+    }
+
+    .paste-ui-section-nav-toggle {
+      display: none;
+      min-width: 44px;
+      min-height: 44px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .paste-ui-section-nav-toggle-icon {
+      &:where(:not([hidden]), [hidden="until-found" i]) {
         display: block;
       }
     }
 
-    @media (min-width: $breakpoint) {
-      display: block;
-    }
-  }
-
-  .paste-ui-section-nav-items {
-    list-style: none;
-    margin: 0 auto;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    height: $height;
-    max-width: $max-width;
-  }
-
-  .paste-ui-section-nav-item {
-    > .paste-ui-section-nav-link {
-      display: block;
-      padding: $link-padding;
-      color: $link-color;
-      font-size: $font-size;
-      text-decoration: none;
-      transition: color 0.15s ease-in-out;
-
-      &:hover {
-        color: $link-hover-color;
+    .paste-ui-section-nav-panel {
+      @media (min-width: $breakpoint) {
+        &:where(:not([hidden]), [hidden="until-found" i]) {
+          display: contents;
+        }
       }
-    }
-  }
 
-  .paste-ui-section-nav-toggle {
-    display: none;
-    min-width: 44px;
-    min-height: 44px;
-    align-items: center;
-    justify-content: center;
-  }
+      @media (max-width: ($breakpoint - 0.02px)) {
+        display: none;
+        position: fixed;
+        inset: $height 0 0;
+        margin: 0;
+        border: 0;
+        padding: 0;
+        width: auto;
+        height: auto;
+        max-width: none;
+        background: $background;
+        color: inherit;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        flex-direction: column;
+        z-index: 1;
 
-  .paste-ui-section-nav-toggle-icon {
-    display: block;
-  }
+        &:target:where(:not([hidden]), [hidden="until-found" i]) { display: flex; }
 
-  .paste-ui-section-nav-panel {
-    @media (min-width: $breakpoint) {
-      display: contents;
+        > .paste-ui-section-nav-items {
+          flex: 0 0 auto;
+          flex-direction: column;
+          align-items: stretch;
+          height: auto;
+          margin: 0;
+          max-width: none;
+          width: 100%;
+        }
+
+        .paste-ui-section-nav-item {
+          flex: 0 0 auto;
+          > .paste-ui-section-nav-link {
+            box-sizing: border-box;
+            min-height: 44px;
+          }
+        }
+      }
     }
 
     @media (max-width: ($breakpoint - 0.02px)) {
-      display: none;
-      position: fixed;
-      inset: $height 0 0;
-      margin: 0;
-      border: 0;
-      padding: 0;
-      width: auto;
-      height: auto;
-      max-width: none;
-      background: $background;
-      color: inherit;
-      overflow-y: auto;
-      overscroll-behavior: contain;
-      flex-direction: column;
-      z-index: 1;
-
-      &:target { display: flex; }
-
-      > .paste-ui-section-nav-items {
-        flex: 0 0 auto;
-        flex-direction: column;
-        align-items: stretch;
-        height: auto;
-        margin: 0;
-        max-width: none;
-        width: 100%;
-      }
-
-      .paste-ui-section-nav-item {
-        flex: 0 0 auto;
-        > .paste-ui-section-nav-link {
-          box-sizing: border-box;
-          min-height: 44px;
+      &.paste-ui-section-nav-disclosure .paste-ui-section-nav-open {
+        &:where(:not([hidden]), [hidden="until-found" i]) {
+          display: inline-flex;
         }
       }
+      .paste-ui-section-nav-panel:target ~ .paste-ui-section-nav-open {
+        display: none;
+      }
+      .paste-ui-section-nav-panel:target ~ .paste-ui-section-nav-close {
+        &:where(:not([hidden]), [hidden="until-found" i]) {
+          display: inline-flex;
+        }
+      }
+    }
+
+    .paste-ui-visually-hidden {
+      border: 0;
+      clip: rect(0 0 0 0);
+      height: 1px;
+      margin: -1px;
+      overflow: hidden;
+      padding: 0;
+      position: absolute;
+      white-space: nowrap;
+      width: 1px;
     }
   }
 
   @media (max-width: ($breakpoint - 0.02px)) {
-    .paste-ui-section-nav-disclosure .paste-ui-section-nav-open {
-      display: inline-flex;
-    }
-    .paste-ui-section-nav-panel:target ~ .paste-ui-section-nav-open {
-      display: none;
-    }
-    .paste-ui-section-nav-panel:target ~ .paste-ui-section-nav-close {
-      display: inline-flex;
-    }
-    html:has(.paste-ui-section-nav-panel:target) {
+    @at-root html:has(:where(#{&}) .paste-ui-section-nav-panel:target) {
       overflow: hidden;
     }
-  }
-
-  .paste-ui-visually-hidden {
-    border: 0;
-    clip: rect(0 0 0 0);
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    padding: 0;
-    position: absolute;
-    white-space: nowrap;
-    width: 1px;
   }
 }

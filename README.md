@@ -2,7 +2,8 @@
 
 **Paste Elements** is the core UI kit for the Paste ecosystem.
 
-YUI-style modules: each element bundles its **JS behavior + SCSS styling** together.
+YUI-style modules keep behavior and styling together where both are needed.
+SCSS-only components and structure do not require JavaScript.
 Works standalone for basic HTML sites, or with `paste-surface-*` for templated apps.
 
 ## Directory Structure
@@ -16,15 +17,23 @@ paste-elements/
 │
 ├── modules/                    # UI modules (JS + SCSS together)
 │   ├── heroscroll/             # heroscroll.js, heroscroll.scss, _mixin.scss
+│   ├── smoothscroll/           # Optional controlled anchor movement/history
 │   ├── stickynav/              # stickynav.js, stickynav.scss
 │   ├── scrollspy/              # scrollspy.js, scrollspy.scss
 │   ├── sectionnav/             # sectionnav.scss, _mixin.scss (no JS)
 │   ├── autogrow/               # autogrow.js, autogrow.scss, _mixin.scss
-│   ├── smoothscroll/           # smoothscroll.js
+│   ├── allowed_chars/          # Typed-character filtering
+│   ├── imageupload/            # Paired file, URI, preview and status
+│   ├── js_tooltip/             # Authored rich help (+ optional SCSS)
 │   ├── multistate/             # multistate.js, multistate.scss
+│   ├── navigate_on_change/     # Explicit control-value navigation
+│   ├── prevent_double_submit/ # Native navigation submission guard
+│   ├── sortable/               # Fixed-slot content swapping
+│   ├── update_text_on_input_change/ # Safe text-node reflection
 │   ├── marquee/                # marquee.js, marquee.scss, _mixin.scss
-│   ├── form/                   # form.js
-│   ├── io-reply-fragment-envelope/
+│   ├── form/                   # form_validity, form_apply, form_html, form_autosave; shared form styles
+│   ├── button/                 # button.scss, _mixin.scss (no JS)
+│   ├── address/                # address.scss, _mixin.scss (no JS)
 │   ├── scrollscrub/            # Scroll progress custom property
 │   ├── imagesequence/          # Scroll-driven frame catalog host (+ SCSS)
 │   ├── progressiveresolution/  # Resolution upgrades under CSS policy
@@ -54,7 +63,7 @@ paste-elements/
     ├── sequence-hero.html      # imagesequence intro + range, scrollscrub, resolution
     ├── avatars.html            # progressiveresolution under an authored cap
     ├── heroscroll.html         # heroscroll parallax and image fade
-    ├── stickynav.html          # stickynav body class and CSS-owned stuck state
+    ├── stickynav.html          # declared sticky target and CSS-owned nav state
     ├── marquee.html            # Built by tests/build-marquee-example.cjs
     ├── sectionnav.html         # Built by tests/build-sectionnav-example.cjs
     └── *.conf                  # Hand-authored inputs to those example builds
@@ -65,6 +74,110 @@ The published package is source only: `base/`, `modules/`, `structure/`,
 tooling and the examples stay in the repository; `.gitattributes` marks
 `tests/` and `examples/` `export-ignore`, so source archives built from a tag
 leave them out too.
+
+## Sass ownership and migration
+
+`base/mixins` provides shared variables and helpers without emitting CSS.
+`base/base` deliberately adds the global reset. It does not choose a form,
+button or address skin for the application.
+
+**Import migration:** if your application relied on those styles previously
+emitted by `base/base`, explicitly retain them in the same place, before your
+application overrides:
+
+```scss
+@import 'base/base';
+@import 'modules/form/form';
+@import 'modules/button/button';
+@import 'modules/address/address';
+```
+
+These are the existing presentation defaults, separated from the baseline.
+Import only the presentation your application wants. Form behavior remains an
+independent JavaScript choice. Existing form-field/formfield aliases remain.
+
+Structure follows the same distinction. `structure/grid/mixin` defines
+`paste-grid()` without output; `structure/grid/grid` includes it to emit the
+standard grid. Layout, spacing and typography provide corresponding
+`paste-layout()`, `paste-spacing()` and `paste-typography()` mixins and retain
+their existing default stylesheet entry points. Set their existing `!default`
+variables before importing. Do not import the emitting entry point and include
+the same mixin again unless duplicate output is intended.
+
+For scoped typography, explicitly choose the current selector as its root:
+
+```scss
+@import 'structure/typography/mixin';
+.article {
+  @include paste-typography($root: '&');
+}
+```
+
+The default `structure/typography/typography` entry still styles `body` and
+headings globally. Component definition imports (`modules/form/mixin`,
+`modules/button/mixin`, `modules/address/mixin`) are also silent. Their mixins supply declarations to the selector that includes them:
+
+```scss
+@import 'modules/button/mixin';
+@import 'modules/address/mixin';
+@import 'modules/form/mixin';
+
+.checkout-submit { @include paste-ui-button(); }
+.shipping-address { @include paste-ui-address(); }
+.checkout-field { @include paste-ui-form-field(); }
+.checkout-help { @include paste-ui-form-description(); }
+.checkout-error { @include paste-ui-form-error(); }
+```
+
+No Paste wrapper class is required by these mixins. Field descendants and states
+remain relative to the chosen field selector. The default component stylesheets
+choose the existing selectors using `$paste-prefix` (`paste-ui` by default),
+then include those same mixins. Set the prefix before importing a default
+stylesheet if you want its class names changed. The structure bundle mixins
+above generate a collection of standard selectors; they are not single-element
+declaration mixins.
+
+The grid styles exact generated column classes, including `.paste-col-auto`.
+It no longer styles arbitrary classes containing `paste-col-`. Custom columns
+must own their declarations. The column count must be a positive unitless whole
+number, and container breakpoint names must exist in `$paste-breakpoints`;
+invalid configurations now fail compilation.
+
+Standalone helper imports load their defaults themselves. `strip-units()`
+returns a number; `$unit-default-px` respects a value set before import.
+Demo fragment IDs are page-specific and remain paired with their anchor links.
+
+Validate these boundaries with the project's assetgraph executable:
+
+```sh
+PASTE_ASSETGRAPH_BIN=/path/to/paste-assetgraph node tests/style-contract-checks.cjs
+```
+
+Add `--browser` with `PLAYWRIGHT_MODULE` and `ELEMENTS_BROWSER_EXECUTABLE` set
+for native Chromium checks of selector isolation, scoped typography, hidden
+controls and forced-color focus. These checks use unminified output; correctness
+must not depend on an optimizer. Repeat with `--minify --browser` to check the
+optimized output as well.
+
+The `autogrow`, `heroscroll`, `imagesequence`, `marquee`, and `sectionnav`
+component mixins also style the caller's selector. The corresponding emitting
+stylesheet selects Paste's default root. Definition imports alone emit no CSS:
+
+```scss
+@import 'modules/autogrow/mixin';
+@import 'modules/sectionnav/mixin';
+.contact-notes { @include paste-ui-autogrow(); }
+.site-navigation { @include paste-ui-sectionnav(); }
+```
+
+**Mixin migration:** put an existing root-level include inside its intended
+root selector, or import the emitting stylesheet for the existing Paste defaults.
+Hero, marquee and section-nav child role classes remain part of their markup
+contract. Section-nav target clearance remains a deliberate document rule;
+pass `$target-clearance: null` to omit it. Disclosure scroll locking is scoped
+to targeted panels inside the caller's root. Marquee direction inheritance and
+its namespaced keyframes remain deliberate global rules. These style choices
+leave JavaScript activation attributes and classes unchanged.
 
 ## Usage
 
@@ -114,7 +227,7 @@ $paste-grid-columns: 16;
   </div>
 </section>
 
-<script src="/paste/site-1/paste.ui.heroscroll~paste.ui.smoothscroll.min.js" defer></script>
+<script src="/paste/site-1/paste.ui.heroscroll.min.js" defer></script>
 ```
 
 The script is a JAM combo URL served through paste-assetgraph: the first path
@@ -134,17 +247,24 @@ Processes all JS/SCSS, generates versioned output and manifest.
 | Module | JS | SCSS | Description |
 |--------|:--:|:----:|-------------|
 | heroscroll | ✓ | ✓ | Parallax hero sections |
+| smoothscroll | ✓ | - | Optional motion and independently controlled history |
 | stickynav | ✓ | ✓ | Sticky navigation bar |
 | scrollspy | ✓ | ✓ | Marks a nav item active as its section scrolls into view |
 | sectionnav | - | ✓ | In-page section navigation styling |
-| autogrow | ✓ | ✓ | Auto-resize textareas |
-| smoothscroll | ✓ | - | Keyboard focus for native in-page fragment links |
+| autogrow | ✓ | ✓ | Grow-only textarea enhancement |
+| select | ✓ | ✓ | Custom appearance over a native select; reflected option label |
+| button | - | ✓ | Optional button presentation |
+| address | - | ✓ | Optional address presentation |
 | multistate | ✓ | ✓ | Hash-driven UI state (`#key:value`) for tabs and radio inputs |
 | marquee | ✓ | ✓ | One semantic list with optional CSS-driven continuous motion |
 | throttle | ✓ | - | Event throttling utility (`paste.ui.utilities.throttle`) |
 | animation-frame | ✓ | - | Batches DOM writes into the next animation frame (`paste.ui.utilities.animation-frame`) |
-| form | ✓ | - | Background submit of `form[data-paste-form]` inside an IO reply fragment target (`paste.ui.form`) |
-| io-reply-fragment-envelope | ✓ | - | Applies IO reply fragment envelopes to named targets and bound attributes (`paste.ui.io-reply-fragment-envelope`) |
+| form | ✓ | ✓ | Ordinary-form validity reflection and submission blocking |
+| apply | ✓ | ✓ | Class-activated JSON submission and field messages |
+| form_html | ✓ | — | Explicit submission with HTML or named JSON-fragment replies |
+| fragment_navigation | ✓ | — | Opted-in anchor navigation into a named target |
+| lazy_loader | ✓ | — | Caller-triggered loading of declared HTML content |
+| carousel | ✓ | ✓ | Discrete pages, controls, named instances and original events |
 | scrollscrub | ✓ | - | Publishes a declared scroll range's progress as a CSS custom property (`paste.ui.scrollscrub`) |
 | imagesequence | ✓ | ✓ | Scroll- and intro-driven frame catalog on an image or background host (`paste.ui.imagesequence`) |
 | progressiveresolution | ✓ | - | Sharper image representations under a CSS cap (`paste.ui.progressiveresolution`) |
@@ -199,7 +319,8 @@ form controls, or other focusable content; it deliberately keeps those in normal
 
 There is no imperative surface: `data-paste-marquee` binds at module evaluation and the authored
 toggle is the only pause control. Dynamic list items are measured through a MutationObserver scoped
-to the list's own children; element bindings live as long as the page does. Paste loads at the end
+to the list subtree and its interactivity attributes (`class`, `href`, `tabindex`,
+`contenteditable`, `controls`); style writes are not observed. Bindings live as long as the page does. Paste loads at the end
 of the document, after the markup it enhances, so roots with `data-paste-marquee` present when the
 module runs activate immediately. No global prototype is patched.
 
@@ -257,7 +378,7 @@ handler. The module ships no JavaScript and needs none.
 <nav class="paste-ui-section-nav paste-ui-section-nav-disclosure" aria-label="Sections">
   <div id="site-sections" class="paste-ui-section-nav-panel" tabindex="-1">
     <ul class="paste-ui-section-nav-items">
-      <li class="paste-ui-section-nav-item"><a href="#first">First section</a></li>
+      <li class="paste-ui-section-nav-item"><a class="paste-ui-section-nav-link" href="#first">First section</a></li>
     </ul>
   </div>
   <a id="site-sections-toggle" class="paste-ui-section-nav-toggle paste-ui-section-nav-open"
@@ -277,22 +398,18 @@ the hash; narrowing again reopens the panel while the URL still targets it,
 which is intentional rather than a state reset. The optional scroll lock is
 the mixin's `html:has(.paste-ui-section-nav-panel:target) { overflow: hidden }`
 rule — the only `:has()` use — and degrades to an unlocked menu where `:has()`
-is unsupported. Click handlers must not intercept these anchors;
-`paste.ui.smoothscroll` never prevents a click and gives links inside
-`paste-ui-section-nav-disclosure` no focus handling, so the browser owns
-disclosure navigation.
+is unsupported. The browser owns disclosure navigation. Use ordinary anchors and author
+`tabindex="-1"` on a destination that needs to take focus.
 
 Fragment targets clear the nav. The mixin emits a zero-specificity
-`:where(:target, .paste-ui-hero-destination) { scroll-margin-top:
+`:where(:target) { scroll-margin-top:
 var(--paste-ui-section-nav-clearance, <auto>) }` rule, where `auto` is the
 nav's own box: `$height` plus the first width in `$border-bottom` (51px with
 the defaults). The browser reads it when it scrolls to a fragment — a link, or
 a page loaded with a fragment — so a target lands at the bottom of a fixed or
-sticky section nav instead of under it. The second selector covers the hero
-without an id that a `data-hero-hashclick` click last scrolled to: it is no
-target, so `paste.ui.heroscroll` marks it `paste-ui-hero-destination` until the
-next hash click. Back and Forward restore each entry's own scroll position. Any
-`scroll-margin-top` rule the page writes for its targets wins over the default.
+sticky section nav instead of under it. Back and Forward restore each
+entry's own scroll position. Any `scroll-margin-top` rule the page writes
+for its targets wins over the default.
 When more fixed chrome sits above the targets, such as a site header the nav
 sticks beneath, set the custom property to the total:
 
@@ -310,15 +427,16 @@ html { scroll-padding-top: 6.5rem; }
 ```
 
 `scroll-margin-top` also grows an element's scroll-snap area. On a page that
-snaps, the current target and the marked hero may rest the clearance lower than
-their neighbours, and one whose area outgrows the viewport no longer snaps
+snaps, the current target may rest the clearance lower than its neighbours,
+and one whose area outgrows the viewport no longer snaps
 firmly; other heroes are untouched. Such a page clears its chrome with
 `scroll-padding-top` on the snapping scroller, which moves every snap position
 alike, and zeroes the custom property as above.
 
 Pass `$target-clearance: null` to leave targets to the page, or a length to
-replace `auto`. Motion is not part of the default; see the smoothscroll
-migration note for `scroll-behavior` and reduced motion.
+replace `auto`. The stylesheet does not enable smooth movement. Load the optional
+smoothscroll module for its movement/history contract, or declare CSS
+`scroll-behavior` when native anchor navigation is sufficient.
 
 Build and serve the runnable example:
 
@@ -329,7 +447,7 @@ python3 -m http.server 8078 --bind 127.0.0.1 --directory target/sectionnav-examp
 
 ## Form
 
-`paste.ui.form` submits a `form[data-paste-form]` that sits inside an
+`paste.ui.form.form_html` submits a `form[data-paste-form]` that sits inside an
 IO reply fragment target in the background and swaps the returned markup
 into that target — the same request the browser would have sent, so the
 form works identically without JavaScript.
@@ -346,7 +464,7 @@ form works identically without JavaScript.
 
 On submit the Element reads the submission the way the browser does: the
 submitting button's `formaction`, `formmethod`, `formenctype` and `formtarget`
-override the form's `action`, `method`, `enctype` and `target`; without either
+override the form's `action`, `method`, `enctype` and `target`; with an empty or missing effective
 target the document's `<base target>` applies. A nonempty action resolves
 against the document's base URL, and an empty one is the document's URL. It
 then finds the nearest `[data-paste-io-reply-fragment-target]` ancestor and
@@ -369,34 +487,38 @@ label of the replacement encoding (`iso-2022-kr` and its aliases) followed
 by another is skipped, so the later label decides. Only `get` and `post`
 submissions are intercepted, and only when the resolved action is
 same-origin — only same-origin markup is ever placed in the page. A target answers one
-submission at a time: it is `aria-busy` for the duration, and while a request
-is in flight further submits from any form inside it — or inside a target
-around it or within it, whose reply would replace it or be replaced by it —
-are ignored, so the reply that lands is always the pending request's. The
+submission at a time: it carries `aria-busy="true"`,
+`paste-ui-io-html-fragment-busy` and `.paste-ui-formhtml-busy` while the background request is pending. This is one busy
+state; preparation alone, invalid/native submissions and ignored duplicate
+submissions do not create another state. The class is a styling hook on the
+reply target, not on the form. The form busy class clears and the prior
+`aria-busy` value is restored when its owner settles, before failure notification or replay. Existing unrelated classes stay
+intact. While a request is in flight further submits from any form inside it —
+or inside a target around it or within it, whose reply would replace it or be replaced by it —
+are ignored. A committed independent fragment write can supersede the pending
+request; a superseded or detached form never replays or adds a failure notice. The
 request carries a deadline — `data-paste-form-timeout` in decimal
 milliseconds on the form, default 30000; positive integers through
 4294967295 are honored and the literal `0` opts out, while blank, fractional,
 signed, scientific-notation, hexadecimal or overflowing input falls back to
-the default rather than disabling the deadline silently. The deadline runs
-on the module's own timer, which aborts the request and reports it as a
-`"timeout"` (an engine may ignore an XHR timeout assigned after the request
-is sent); a value past the longest delay a timer holds, about 24.8 days, runs
-at that limit. A stalled request cannot hold the busy state forever.
+the default rather than disabling the deadline silently. The shared operation
+sets the native XHR timeout before sending; no second deadline timer is needed.
+A stalled request cannot hold the busy state forever.
 
-An HTML response of any status whose final URL, after any redirect, is on the
+An HTML or matching named JSON-fragment response of any status whose final URL is on the
 page's origin replaces the target's content, enhances forms inside it, and
 focuses the first `[role="alert"]` or `[role="status"]`. Every other outcome
 after transmission — a network error, timeout or abort, or a response the
-form cannot place (a non-HTML reply, or an HTML reply whose final URL left
+form cannot place (an unsupported/malformed reply, or a reply whose final URL left
 the page's origin) — follows one rule: the busy state clears, then the form
-dispatches `paste.ui.form:failed`, a bubbling, cancelable event whose
+dispatches `paste.ui.formhtml:failed`, a bubbling, cancelable event whose
 `detail.reason` is `"error"`, `"timeout"`, `"abort"` or `"response"`. A
 listener that calls `preventDefault()` owns the failure UX; otherwise the form
 resubmits natively only where a replay cannot duplicate the submission — a
 `get`, or a form carrying `data-paste-form-idempotent`, which declares that
 the endpoint itself collapses replays (an idempotency key or equivalent;
 the attribute alone provides no protection). Any other failure appends and
-focuses a `paste-ui-form-failure` `role="alert"` notice inside the form —
+focuses a `paste-ui-formhtml-failure` `role="alert"` notice inside the form —
 "may have been received, check before submitting again" — preserving every
 entered value. Leaving the page mid-submit is the visitor's choice: an engine
 may abort the request as the navigation starts, or fail it as a network
@@ -407,7 +529,7 @@ notice when unhandled, which also covers a navigation that ends without
 leaving (a download or a 204). A `beforeunload` the visitor answers by
 staying on the page counts for half a second after the page's tasks resume
 (timers wait while the prompt is open); with no `pagehide` by then, a later
-failure keeps its replay rule. The deadline's own abort is always a
+failure keeps its replay rule. The native deadline reports
 `"timeout"` and keeps its replay. A request that could
 not be transmitted at all is the single exception: it submits natively
 unconditionally, because nothing was sent.
@@ -416,7 +538,7 @@ already default-prevented submit, a form without an IO reply fragment target,
 a browser that does not report the submitting
 button (`SubmitEvent.submitter`), a browser whose `FormData` does not take
 the submitting button (`new FormData(form, submitter)`), an image submit
-button, a `post` encoded as `text/plain`, a target naming a browsing context
+button, a `noreferrer` form, a `post` encoded as `text/plain`, a target naming a browsing context
 other than `_self`, a form whose submit would not go out as UTF-8 (or that declares
 `accept-charset` in a browser without `TextDecoder` to resolve it), or a
 browser missing `WeakMap`, `XMLHttpRequest`,
@@ -428,30 +550,153 @@ present when the module runs are enhanced immediately, and forms inside a
 swapped-in IO reply fragment are enhanced as they are placed. Each form is
 enhanced once; the module exposes no public API.
 
-## IO Reply Fragment Envelope
+## Apply and deferred content
 
-`paste.ui.io-reply-fragment-envelope` applies an IO reply fragment envelope — a
-JSON reply for updating named targets outside a form submit, such as autosave
-or paging a list.
+`paste.ui.form.form_validity` owns native validity reflection and blocking. Select
+`form.paste-ui-apply` plus `paste.ui.form.form_apply` for the original JSON
+`success.message`/`error.message`/`error.param` flow; select
+`form.paste-ui-formhtml` plus `paste.ui.form.form_html` for HTML replies. Both keep
+ordinary native form fallback. Loading the validity module alone does not
+intercept network submission. Use only one submission enhancement per form.
+
+`paste.ui.lazy_loader` keeps the separate `data-lazy-load` contract and four
+APIs: `load_lazy_content(element)`, `load_all_content(parent)`,
+`load_visible_content(parent)` and `set_init_new_content(callback)`. A caller
+invokes it after a meaningful transition, such as showing a radio-selected
+panel. Visible means positive layout width and height, not viewport intersection.
+The loader installs no automatic observers or event listeners. It suppresses
+concurrent duplicate requests, leaves failed declarations retryable, and calls
+the hook after inserting successful trusted HTML and removing the declaration.
+`data-lazy-load-timeout` declares the request deadline in decimal
+milliseconds, default 30,000, `0` for none.
+
+`paste.ui.carousel` restores discrete paging, generated controls,
+optional indicators/counter, named instances, movement events, swipes and
+cycling. Its mixin and default stylesheet follow the existing opt-in split.
+Without enhancement, authored slides remain ordinary content. See the matching
+Surface contracts for attributes, methods, intentional fixes and markup.
+
+The shared `paste.ui.utilities.form-dom` boundary reads native form members
+without letting named controls shadow them. It neither mutates the form's API
+nor bans field names. Form modules use it for DOM members and native listener
+registration; it creates no automatic listeners or per-form cache. Collection
+access also uses the native `HTMLFormElement.elements` getter.
+
+For named external libraries, use the app-owned wrapper/JAM example in
+[examples/external-libraries](examples/external-libraries/README.md). The app
+owns the library version and URL; no new loader or Surface element is required.
+
+## Shared HTML fragment operation
+
+`paste.ui.utilities.io-html-fragment` is a caller-triggered utility. Forms,
+marked links and lazy loading use its `load(target, options)` operation. Autosave
+uses `apply(data)` after independently acknowledging its successful save.
+The utility does not discover triggers, submit forms, navigate, initialize other
+modules, execute scripts, load envelope assets or keep a content cache.
+
+`load` accepts `url`, optional `method` (GET), `body`, `contentType`, and `timeout`
+(30,000 milliseconds; zero disables it). `prepare()` may supply the request's
+`url`, `method`, `body` and `contentType` after reserving the target; forms use
+this because constructing FormData can synchronously dispatch `formdata`.
+`onStart()` runs immediately before transmission. Optional `beforePlace()` runs
+after the response markup is validated and immediately before its DOM write;
+link navigation uses it to establish the destination URL for relative resources.
+`onDone(response, status, xhr)` runs after placement and release. `onFailed(reason, sent)` runs after release;
+reasons are `unsupported`, `busy`, `request`, `response`, `error`, `timeout`,
+`abort`, `stale` and `superseded`. Completion callbacks are required. A caller may provide
+`deferFailure(reason, complete)` to retain the target until its owned failure
+decision runs; it must call `complete()`. Form replay uses this for one task
+so native navigation can take precedence. Supersession still retires that decision. The returned
+operation has `cancel()` for silent cancellation; a refused start returns null.
+An optional `isCurrent()` predicate lets an explicit caller invalidate its own
+request before placement. XHR timeout and terminal handlers are set before send.
+
+Only HTTP(S) requests on the page origin and responses whose final URL is on
+that origin are eligible. The target must remain in the document. A missing
+required capability or malformed target format leaves callers their native
+fallback. A caller must supply a real element target, valid options and trusted
+HTML: this operation is an HTML sink, not a sanitizer.
+
+The target's `data-paste-io-reply-fragment-format` is `html` by default (also
+when omitted), or `json`. `html` sends `Accept: text/html, application/json`;
+`json` sends `Accept: application/json`. Both accept either response format.
+An invalid declaration refuses the enhancement. `paste.io` supplies
+`X-Requested-With: XMLHttpRequest`. Servers retain the full-page rendering at
+the same URL and send `Vary: X-Requested-With, Accept`. Cache policy belongs to
+the endpoint: public article fragments may be cached; personalized or token
+bearing responses need their own policy. The browser utility adds no cache.
+
+A `text/html` response replaces the target's inner markup. An `application/json`
+response must contain `data.fragments[targetName].markup` as a string; only
+that named target is replaced, and its descendant/root bindings receive
+`data.variables`. Empty markup is valid. JSON scalar strings, including an empty
+string, are not HTML replies. Malformed JSON, an absent matching fragment, a bodyless status (204, 205 or 304), another content type or an
+off-origin final URL is an unusable reply.
+The default accepts 2xx responses. `acceptResponse(status, xhr)` lets the
+request owner decide before placement: form HTML accepts rendered error
+responses, including 422 validation messages in either representation; lazy
+loading keeps error replies retryable without replacing its fallback. `data.title` is optional and
+used only by fragment navigation. `js` and `css` metadata remain inert.
+
+One pending load owns its target and excludes new overlapping loads, including
+ancestor/descendant targets. The target carries `aria-busy="true"` and
+`paste-ui-io-html-fragment-busy`; settlement restores its prior aria value and
+preserves a pre-existing busy class. A committed independent `apply(data)` write
+supersedes outstanding overlapping loads. Those operations are released and
+aborted, and their later replies cannot overwrite the new content. Supersession
+is not a transport failure: adapters perform no failure UI or native replay.
+This is a commit-order guarantee, not a global newest-request protocol.
+
+`apply(data)` preserves the original autosave envelope behavior: own-key order,
+original modules before Surface fragments, every matching live target across the
+document, and a fresh target scan after each name. Bindings run after markup;
+the original vocabulary accepts strings/numbers/booleans and Surface accepts strings. Missing or
+malformed entries are ignored. Autosave still requires HTTP 200 and meta.code
+200 to acknowledge the sent snapshot; later edits remain dirty. It applies
+reply markup only while the originating form is still in the document.
+
+## Fragment navigation
+
+Load `paste.ui.fragment_navigation` for explicitly marked anchors:
 
 ```html
-<div class="paste-ui-io-reply-fragment-target" data-paste-io-reply-fragment-target="results"><!-- markup --></div>
-<span data-paste-io-reply-fragment-bind="data-state=status"></span>
+<a href="/articles/example" data-paste-io-reply-fragment="article">Read article</a>
+<div data-paste-io-reply-fragment-target="article">Existing article</div>
 ```
 
-`paste.ui.io-reply-fragment-envelope.apply(envelope, status, root)` applies an
-envelope only when `status` and `envelope.meta.code` are both `200`. Each
-`data.fragments[name].markup` replaces the content of every
-`[data-paste-io-reply-fragment-target="name"]` inside `root` (default: the
-document) as that name is applied — a target an earlier fragment's markup
-placed is found, one it detached is not. Names with no matching target are
-skipped and `js`/`css` lists are ignored — the Element does not load them.
-It places markup only: Elements inside the placed markup, `paste.ui.form`
-included, are not enhanced. Each element carrying
-`data-paste-io-reply-fragment-bind="attribute=variable, ..."` has `attribute`
-set to `data.variables[variable]` for every variable present in the envelope
-as a string; any other value is ignored. It returns the number of target
-elements replaced, or `0` when nothing was applied.
+The `href` is the complete navigable page URL. With no enhancement it navigates
+normally. With enhancement, an ordinary primary activation requests and places
+the target's representation. After validating the reply, it pushes the authored
+URL (retaining its hash) immediately before placing markup. A later eligible
+link supersedes this module's earlier request.
+A missing or ambiguous target, modifiers, non-primary buttons, downloads,
+referrer-policy declarations, noreferrer, ping, non-self browsing targets
+(including base target), credentials, cross-origin
+URLs and same-document links remain native. Names are matched literally, not
+interpreted as selectors. Forms never acquire link navigation behavior.
+`data-paste-io-reply-fragment-timeout` on the anchor declares the request
+deadline in decimal milliseconds, default 30,000, `0` for none.
+
+Committing the URL before placement lets native relative iframe, image and CSS
+resource URLs resolve against the destination. If placement then fails, native
+navigation replaces that new history entry instead of adding another. Wrapped
+JSON may supply `data.title`; without it the title stays unchanged. Focus and
+scroll move to the link's fragment ID when present, otherwise the target.
+Back/Forward across paths or queries reloads the server's full page at the new
+URL; hash-only traversal remains native. This works after a reload as well as
+within the original enhanced document. There is no client page cache or router.
+Redirected replies fall back to native navigation, preserving redirect-supplied
+hashes and other browser redirect semantics that XHR does not expose. A
+transmitted failure falls back to normal navigation to the authored href;
+a later native navigation, including a hash-only change, cancels the pending enhancement. Busy target refusals
+are ignored until their owner settles. Stale/superseded responses never navigate.
+
+The utility leaves inserted markup's initialization to its caller. Form HTML
+submission reinitializes its own replacement forms and validity. Lazy loading
+retains `set_init_new_content` and its explicit single/all/visible load APIs.
+Fragment navigation places document markup; other optional enhancements are
+not automatically discovered or initialized by a global lifecycle system.
+Newly inserted ordinary forms and links retain their native behavior.
 
 ## Structure
 
@@ -461,6 +706,15 @@ elements replaced, or `0` when nothing was applied.
 | layout | Page structure (header, footer) | `$paste-header-height`, `$paste-footer-padding-y` |
 | typography | Headings, paragraphs, links | `$paste-font-family-*`, `$paste-font-size-*` |
 | spacing | Margin/padding utilities | `$paste-spacers`, `$paste-section-padding-y` |
+
+`structure/layout/_mixin.scss` defines the optional `paste-layout()` recipe;
+importing it emits nothing. Including it emits the `.paste-page`,
+`.paste-header`, `.paste-main` and `.paste-footer` rules. These are distinct
+from Surface's `.paste-ui-header`, `.paste-ui-main` and `.paste-ui-footer`
+markup hooks. Surface does not load or opt into this structural recipe.
+Compose it deliberately by adding its classes in an application layout, or
+write the application's layout rules against Surface's hooks. Neither base
+imports nor a component mixin should silently opt a page into that structure.
 
 ## Declarative scroll and image modules
 
@@ -495,8 +749,10 @@ pairs such as `top bottom`; each anchor is `top`, `center` or `bottom`) and
 `data-scrub-window` (two fractions `a b`, 0 ≤ a < b ≤ 1) declare the range. A
 range that cannot measure — anchors that coincide, an element root that cannot
 scroll (a body root among them while the viewport takes the body's overflow
-over), an unrendered subject or root — removes the property, so the authored
-`var()` fallback stands. Measuring runs in the shared animation-frame batch: a
+over), an unrendered subject or root — restores the authored inline value and
+priority while the module still owns the declaration. A later writer is
+preserved. With no authored value, the module removes its declaration and the
+CSS `var()` fallback stands. Measuring runs in the shared animation-frame batch: a
 root's own scroll re-reads only its offset, while a resize, an observed box or
 content growing — the root's content, or the boxes on an element-mode
 subject's own path, so content changing inside a fixed-height wrapper counts —
@@ -520,7 +776,8 @@ watched, and the scope and its sequence still agree.
 buffer, the `ready` trigger, `ease-in-out` or `linear` easing, and an optional
 skip control, which must be an authored `type="button"` carrying `hidden`).
 Without `data-sequence-intro-skip` the intro has no skip control and still ends
-on any scroll, a hidden document, reduced motion, a failure, or completion;
+on scroll in direct mode, a hidden document, reduced motion, a failure, or completion;
+queued mode finishes a running intro before scroll travel (see Ordered playback).
 `data-sequence-scrub-buffer-frames` holds a frame change until that many frames
 in the direction of travel are ready. The authored image is the baseline: it
 stays until a wanted frame is ready, and it is the whole presentation without
@@ -538,6 +795,10 @@ descriptor plus a `sizes` equal to the frame's intrinsic width, so the box
 never grows with the pixels, whatever the CSS sizing; the pair comes off before
 the next base paint and under reduced motion, each attribute only while it
 still holds the module's own value.
+With CSS `width: auto; height: auto`, loading placeholders remain browser-owned.
+Use CSS dimensions when the layout must stay fixed even during a native image
+update; width descriptors preserve the decoded image's intrinsic size.
+
 An `img` with an authored `srcset` or `sizes`, or inside `<picture>`, is left
 to the browser without a report.
 
@@ -546,7 +807,10 @@ While a background-image transition is in flight — as `getAnimations()` lists
 it, or, where the platform cannot list animations, for a bounded time under a
 declared transition — the paint is pending and sharpening waits for it to
 settle; any other value, such as an `!important` stylesheet rule outranking the
-frame, reverts the paint at once. A poster restored under reduced motion
+frame, reverts the paint only if the module still owns the inline value and
+priority. A newer inline declaration is preserved; completion work yields until
+a fresh page input permits another presentation decision. Reduced-motion
+restoration also preserves newer image writes. A poster restored under reduced motion
 through such a transition is adopted when the transition ends, so a declared
 initial frame zero still sharpens. A frame whose decoded pixels contradict its
 catalog entry (another width, or an aspect ratio more than 1% off) fails for
@@ -630,7 +894,7 @@ or a shrunken box never makes the image worse.
 `measure(range)`, `progressFrom`, plus `scrollOffset` and `contentOf` for its
 owners), `imageresolution` validates descriptors and picks a representation
 (pure functions, no DOM) and holds the host reads and the image preparation
-imagesequence and progressiveresolution share, and `mediaquery` holds the one
+imagesequence and progressiveresolution share, and `mediaquery` holds the shared
 `matchMedia` binding the elements share (`observe`, `motionReduced`,
 `watchResolution`). They are internal to the elements: a page loads them
 because an element requires them, and none reads markup of its own.
@@ -645,19 +909,23 @@ a host binds leaves that host as authored without a report.
 
 ## Numbers in attributes
 
-Every numeric attribute the elements read takes one grammar, applied to the
-attribute text exactly as authored — nothing is trimmed:
+Numeric atoms use the following grammar. Single-value attributes are read
+exactly as authored — nothing is trimmed:
 
-- a whole number is digits only: `data-sticky-min-width`, `data-spy-min-width`,
-  `data-paste-form-timeout`, imagesequence's catalog indices and
+- a whole number is digits only: `data-sticky-min-width`,
+  `data-paste-form-timeout`, `data-autosave-timeout`,
+  `data-image-upload-timeout`, `data-lazy-load-timeout`,
+  `data-paste-io-reply-fragment-timeout`, imagesequence's catalog indices and
   `data-sequence-scrub-buffer-frames`;
 - a decimal is digits with an optional fraction, or a fraction alone (`4`,
   `4.5`, `.5`, `4.`): `data-paste-marquee-duration`, `data-hero-min-opacity`,
   imagesequence's `-ms` durations, and each of the two whitespace-separated
-  fractions of `data-scrub-window`.
+  fractions of `data-scrub-window`. That two-value list permits whitespace
+  around and between its fractions; the individual fractions use the same
+  decimal grammar.
 
-A sign, an exponent, a hexadecimal or binary prefix, a unit or surrounding
-whitespace makes the value something other than a number; each attribute's
+For a single numeric value, a sign, an exponent, a hexadecimal or binary
+prefix, a unit or surrounding whitespace is invalid; each attribute's
 documentation says what then applies. The CSS cap
 `--paste-resolution-max-width` is read from the computed custom property: a
 positive plain decimal there is the cap, and anything else means no cap.
@@ -665,10 +933,11 @@ positive plain decimal there is the cap, and anything else means no cap.
 ## Development checks
 
 Before completing a change, run `tests/run-all-checks.sh`. It must be green:
-syntax, the full Node suite, source headers, a fresh marquee build with
-identity verification, and both browser suites on Chromium, Firefox and
-WebKit. Set `PASTE_CORE_JS`, `PLAYWRIGHT_JAVA_CLASSPATH` and, if necessary,
-`PASTE_ASSETGRAPH_BIN` to installed dependencies first. The script owns its
+syntax, the full Node suite, source headers, readable/minified style contracts,
+native consistency/responsibility checks, a fresh marquee build with identity
+verification, and both Java browser suites on Chromium, Firefox and WebKit.
+Set `PASTE_CORE_JS`, `PLAYWRIGHT_JAVA_CLASSPATH`, `PLAYWRIGHT_MODULE` and, if
+necessary, `PASTE_ASSETGRAPH_BIN` to installed dependencies first. The script owns its
 marquee fixture server; logs land in `target/all-checks/`.
 
 `node tests/mutate-changed.cjs [base..head]` is an optional, local mutation
@@ -720,9 +989,30 @@ export PASTE_CORE_JS="$PWD/target/paste/src/js"
 
 node --test 'tests/*.test.cjs'               # every contract suite
 
+# Compiled CSS/native semantics and operation-count regressions.
+paste-assetgraph build --config tests/consistency-assets.conf
+ELEMENTS_BROWSER=chromium node tests/consistency-browser-checks.cjs
+ELEMENTS_BROWSER=firefox node tests/consistency-browser-checks.cjs
+ELEMENTS_BROWSER=webkit node tests/consistency-browser-checks.cjs
+
+# Marquee interactivity/scale and scrub declaration ownership.
+for engine in chromium firefox webkit; do
+    ELEMENTS_BROWSER="$engine" node tests/responsibility-browser-checks.cjs
+done
+
 PLAYWRIGHT_JAVA_CLASSPATH="$EXISTING_PLAYWRIGHT_CLASSPATH" \
     tests/run-elements-browser-checks.sh     # real Chromium/Firefox/WebKit checks
 ```
+
+The consistency checks use Node Playwright. `PLAYWRIGHT_MODULE` may name its
+installed package path, and `ELEMENTS_BROWSER_EXECUTABLE` may select a local
+browser binary. `ELEMENTS_SOURCE_ROOT` can select a flat built module tree
+(`paste/ui/...`), and `ELEMENTS_CONSISTENCY_BUILD` can select its CSS build. They exercise the compiled hidden guards, including
+`hidden="until-found"`, without increasing component selector specificity;
+native radio selection and inert non-radio markers; image-write ownership;
+and inactive-path operation counts. The legacy direction check uses the actual
+compiled fallback outside its capability condition. Timing benchmarks remain
+separate from these correctness and work-count assertions.
 
 `serve-examples.cjs` binds 127.0.0.1 only and answers only requests whose Host
 names a loopback address. It serves exactly these: the pages under
@@ -808,195 +1098,128 @@ that requires it is defined after that.
 
 | Module | Dependency changes |
 | --- | --- |
-| `paste.ui.form` | adds `paste.event` |
-| `paste.ui.stickynav` | adds `paste.has` |
+| `paste.ui.form.form_validity` | `paste.guid`, `paste.ui.utilities.form-dom` |
+| `paste.ui.stickynav` | uses `paste.dom`, `paste.event`, `paste.ui.utilities.animation-frame`; drops `paste.has` |
 | `paste.ui.heroscroll` | adds `paste.has`, `paste.ui.utilities.animation-frame`, `paste.ui.utilities.mediaquery`; drops `paste.guid` |
-| `paste.ui.smoothscroll` | requires only `paste.dom` and `paste.event`; no `paste.util`, `paste.has` or `mediaquery` |
-| `paste.ui.autogrow` | adds `paste.ui.utilities.animation-frame`; drops `paste.util` |
+| `paste.ui.autogrow` | uses `paste.dom`, `paste.event`; drops `paste.util` and `paste.ui.utilities.animation-frame` |
 | `paste.ui.scrollspy` | adds `paste.ui.utilities.animation-frame`; drops `paste.util` |
 | `paste.ui.marquee` | adds `paste.ui.utilities.animation-frame`, `paste.ui.utilities.mediaquery` |
-| `paste.ui.multistate` | drops `paste.guid` |
+| `paste.ui.multistate` | retains `paste.guid` for generated missing names and ids |
 
 A dropped dependency can still be needed by another module on the page:
 `paste.event` itself requires `paste.guid` and `paste.util`, and `paste.dom`
 requires `paste.util` and `paste.oop`.
 
-**Reduced motion.** Elements that drive animations in JavaScript read the
+**Reduced motion.** Long-running Elements animations read the
 preference through `paste.ui.utilities.mediaquery`: a preference the platform cannot report (no
 `matchMedia`, a throwing one, or a query with no listener API) counts as
-reduced. Native smooth scrolling follows the page's CSS motion policy.
+reduced. Smoothscroll checks `matchMedia` at the start of each movement; a
+missing API or a reduced preference lands immediately. Native smooth scrolling
+follows the page's CSS motion policy.
 
 - **smoothscroll**
-  - No longer publishes `scrollTo` and no longer listens for a window
-    `smoothscroll` event. Use a same-document link inside
-    `data-paste-smoothscroll`, or the native `element.scrollIntoView()`.
-  - Fragment links navigate natively. The module never prevents the click,
-    never writes history and never requests a scroll: the browser updates the
-    address, `:target`, history and `hashchange`, reveals a target inside a
-    closed `<details>` or `hidden="until-found"` where the engine supports it,
-    and scrolls with the page's CSS. A link fires `hashchange` again, so
-    hash-driven scripts see in-page links as they do without the module;
-    `paste.ui.multistate` keeps its selection across a fragment with no
-    `key:value` token.
-  - What remains is focus: after a primary click on a same-document fragment
-    link that resolves to an element, the target takes focus once the
-    navigation lands (`hashchange`, or the next task for the fragment already
-    current), with `preventScroll`. An unfocusable target borrows
-    `tabindex="-1"` until focus moves on. A click a later handler prevents,
-    and Back and Forward, move no focus. The wait for `hashchange` ends a
-    short grace after the task that follows the click: a click the browser
-    never navigates (a link inside an editable region, a navigation a script
-    cancels) moves no focus, and a later, unrelated navigation to the same
-    fragment takes none either.
-  - A fragment resolves as the browser resolves it: an element with that id, else
-    the first `<a name>` with it, raw before percent-decoded. In a quirks-mode
-    document some engines also match a name regardless of case (the first such
-    anchor, even ahead of an exact match; Chromium for most letters, so the
-    long s, the Kelvin sign, final sigma, the micro sign and letters outside
-    the basic plane match their letters, WebKit for ASCII letters only) and
-    others do not; there a name that matches once each code point is folded to
-    the lowercase of its uppercase form counts too, and focus follows the
-    element the browser made its `:target`, provided its id or folded name
-    answers the fragment. Chromium also matches a few pairs that fold
-    differently (some ligatures, Greek letters with diacritics); those take no
-    focus. A link targeting `_self`, the window's own name, or `_parent` or
-    `_top` from a top-level document navigates in place and is handled like an
-    untargeted link; a link's own `target` attribute, even an empty one,
-    outranks `<base target>`.
-  - The JavaScript timer loop, touch-specific policy, nav-height subtraction
-    and moving-target correction are removed. History entries are the
-    browser's: a link to the fragment already current adds none, and Back and
-    Forward restore each entry's scroll position.
-  - CSS owns motion, reduced motion and header clearance. The
-    `paste.ui.sectionnav` stylesheet supplies a target clearance (see Section
-    Navigation); supply motion in the page stylesheet, for example:
-
-    ```css
-    html { scroll-behavior: smooth; }
-    @media (prefers-reduced-motion: reduce) {
-      html { scroll-behavior: auto; }
-    }
-    ```
-
-    A page without the section nav stylesheet supplies clearance itself, with
-    `scroll-margin-top` on targets or `scroll-padding-top` on the scrolling
-    container. These native rules also apply with JavaScript disabled.
-  - A section that takes focus is drawn with the user agent's focus ring where
-    the engine shows one (keyboard use everywhere, mouse clicks in some
-    engines). A page that wants no ring on borrowed focus can write
-    `:where(:target[tabindex="-1"]:focus) { outline: none; }`.
+  - Optional same-document anchor motion: 500 ms cubic easing, with a history
+    update independent of native fragment navigation and no synthetic hashchange.
+    Plain anchor clicks push immediately; legacy marked containers and section
+    navs delegate clicks, including newly inserted links, and push at completion.
+  - `init()` discovers links without duplicate bindings. `scrollTo(element,
+    duration)` moves only; `scrollTo(id, verticalOffset)` retains the older
+    offset/completion-history contract. Omitted duration is 500 ms; zero is instant.
+  - The Paste `smoothscroll` event accepts `newURL`, `verticalOffset`, and
+    `updateHash`. The id has no leading `#`; omitted updateHash is true, false
+    suppresses history. Legacy boolean strings are case-insensitive. An event
+    without a payload uses the current URL fragment.
+  - Wheel input cancels motion and pending completion history. New movement
+    replaces unfinished movement. Reduced motion lands immediately. No focus
+    reassignment. Modified clicks, foreign destinations, downloads, other
+    browsing contexts and missing targets retain native navigation.
+  - Native anchors and CSS remain sufficient when these extra contracts are
+    not needed. CSS smooth motion alone does not establish history equivalence.
 - **stickynav**
-  - No longer clones `.fixed-nav-content` into the fixed navigation. Style it
-    through the stuck class instead, for example
-    `.fixed-nav-content { display: none; } .paste-fixed-subnav
-    .fixed-nav-content { display: block; position: fixed; top: 0; left: 0;
-    right: 0; }`.
-  - No longer inserts a marker element before `.sticky-nav-target`, and no
-    longer reads `#paste-ui-nav` or `#content`. `#_paste_ui_nav_wrap` is
-    optional: when present it should be a header fixed or sticky at the top of
-    the viewport, and its height is the offset the nav sticks at; without it
-    the offset is 0. The `stuck` property on the target element is gone.
-  - The stick threshold follows the content above the target as it is drawn,
-    including ancestors' transforms and zoom, but not a previous sibling's own
-    transform: a `transform` or `translate` on it (a `translateZ(0)` hint, a
-    scroll-linked parallax, an entrance animation) no longer moves the
-    threshold, before or after a resize while stuck. A sibling's `rotate` and
-    `scale` properties are not taken out. When the target has no in-flow
-    previous sibling it sits at its parent's content top, inside the border
-    and padding; a sibling hidden at a breakpoint while the nav is stuck hands
-    over to the next anchor with the margins that apply there.
-  - A target with no box of its own (for example `display: none` at a
-    breakpoint) does not stick until it is shown. Where `ResizeObserver`
-    exists, a box change of the target, its parent or the root element
-    re-measures, so a target revealed later or content growing above it needs
-    no resize. A `display: contents` target is measured through its first
-    child that draws a box.
-  - The `paste-fixed-subnav` class lands on the element
-    `paste.dom.getDocumentBody()` returns — `<html>` in standards mode, as
-    before.
-  - `navStuck` and `navUnstuck` (kept from the original stickynav as
-    documented exceptions to the declarative-only rule) fire only on the stick
-    and unstick transitions, never once per scroll, and only after the class
-    write, so a listener always observes the class it is told about. They are
-    dispatched on the document with the target as payload.
-  - `data-sticky-min-width` (on the target, else on `.paste-ui-section-nav`)
-    takes whole numbers only, and `"0"` is honoured. Any other spelling, such
-    as `"768px"`, is ignored and the next source applies; with neither, the
-    minimum is 0.
+  - Each `[data-paste-sticky-nav]` marks a nav. A nonempty attribute value
+    names its target by CSS selector; an empty value uses the first
+    `[data-paste-sticky-target]`. An absent target uses the nav’s initial
+    document position. Invalid selectors and self targets leave it alone. Each valid nav receives `paste-ui-sticky` and, when its target's
+    bottom reaches the viewport top, `paste-ui-sticky-active`.
+  - The target must remain in flow and keep its geometry when the nav's class
+    changes. CSS owns fixed positioning, any header offset, and any space
+    reserved for the nav. `init()` discovers new declarations and
+    `updateSticky()` synchronously refreshes current navs. Initialization waits
+    for DOM readiness when necessary.
+  - The module batches target reads before class changes in one shared frame.
+    Scroll, resize, page load and optional ResizeObserver reports refresh it.
+    Hidden targets stay inactive. Touch is allowed.
+  - `data-sticky-min-width` lives on each nav and accepts whole nonnegative
+    pixels. At or below that width the nav is inactive; invalid values mean 0.
+  - Migration: replace `.sticky-nav-target` activation with the markers above,
+    and `.paste-fixed-subnav .your-nav` with `.your-nav.paste-ui-sticky-active`.
+    The root class, header-id measurement, `navStuck`/`navUnstuck` events and
+    sibling/transform inference are removed. This deliberately restores the
+    supplied declared-target/per-nav responsibility, rather than retaining
+    the different historical root-event contract.
 - **scrollspy**
-  - `data-spy-min-width` takes whole numbers only; anything else means no
-    minimum.
+  - `data-spy-min-width` retains decimal parseInt behavior: leading
+    whitespace and numeric prefixes are accepted; no numeric prefix means no minimum.
   - Touch devices without `data-spy-touch` bind nothing.
   - Links that share a parent element keep it lit across their sections.
   - The last section lights at the bottom of the page only after the page has
     scrolled, measured against the live document height, and only while that
     section's top is in view.
+  - Where `ResizeObserver` is available, body, nav and linked-section size
+    changes invalidate cached geometry through the existing frame pass.
+    Otherwise window resize and load remain the correction inputs.
+
 - **autogrow**
-  - Activates only on `textarea[data-paste-autogrow]`; the `.autogrow` class
-    alone no longer activates it. Minimum and maximum heights are CSS.
-  - Sizing follows the `input` event — typing, delete, cut, paste, undo —
-    rather than `keyup`.
-  - The mixin no longer sets `resize: none`, so the browser's resize handle is
-    visible and works with or without JavaScript; a height the user drags to
-    becomes the floor. Add `resize: none` in page CSS to hide the handle.
-  - The mixin's `$transition` now defaults to `null` and emits no
-    `transition`. A value passed explicitly is still emitted, but a height
-    transition never runs on a sizing pass: each pass collapses the field to
-    `height: 0` to measure its content (`auto` would fall back to the `rows`
-    height), and a field with any non-zero transition duration or delay has
-    `transition-duration` and `transition-delay` held at `0s` (inline,
-    `!important`) for the pass, so the field still shrinks as text is
-    deleted. The field's own inline values are put back afterwards — an
-    inline `transition` shorthand, `var()` included, exactly as written — and
-    a transition running on another property keeps running. A style change
-    an earlier write in the same frame left pending (a class on the field or
-    an ancestor) is applied before the hold, so it transitions with the
-    author's durations.
-  - A field that is not rendered when the module runs takes its floor when it
-    first renders. A collapse that clamps the page's or the nearest scrolled
-    ancestor's offset puts it back.
+  - Activates on `.autogrow` or `textarea[data-paste-autogrow]`. Shared
+    `input` and legacy `keyup` handlers grows overflowing visible fields
+    at bind and on typing, paste, cut, delete or undo. It never shrinks a field.
+  - CSS owns min/max height, resizing and transitions. The height calculation
+    accounts for padding and border-box sizing, honors resolved pixel caps,
+    and preserves an existing inline height priority. A fitting field performs
+    no computed-style read or style write. A hidden field waits for its next
+    visible input event. Programmatic value changes require an input event.
+  - The mixin emits no `resize` rule and no transition unless explicitly
+    supplied. The module never collapses a field, suppresses a transition,
+    restores scrolling, records a floor or queues a frame.
+  - Migration: deletion now retains the current height. There is no automatic
+    shrink behavior. The animation-frame dependency is removed.
 - **multistate**
-  - Kept from the original multistate as documented exceptions to the
-    declarative-only rule: `initialize(force)` (`initialize(true)` re-scans
-    the document and keeps the markup's authored defaults),
-    `events.multistatepop`, `getCurrentState()`, `serializeState()` and
-    `deserializeState()`. The objects they hand out are plain objects.
-  - Radios are no longer renamed or given generated ids. A key whose radios
-    carry no authored `name` gets one generated name per strip, so each strip
-    is its own native group for arrow keys and Tab. Strips follow the markup:
-    a radio's strip reaches up to its highest ancestor that holds no two of
-    the key's radios with one value, never past a `fieldset`,
-    `[role=radiogroup]` or `[role=tablist]`. Radios that are each alone in
-    such an ancestor and sit side by side (under one parent, or in the cells of
-    a table's rows or the items of a list) split into a new strip where a value
-    repeats; when that would need more strips than the most repeated value has
-    radios, the strips are interleaved (a grid filled row by row, a table with
-    a strip per column) and the nth radio of each value joins the nth strip
-    (interleaved strips that differ in values need authored names). In flat
-    markup such as `x y z x y`, `z` stays with the first strip; wrap
-    each strip, or declare a group, to place it. Strips may offer different
-    values. The first strip is named `paste-ui-multistate:<key>`, the next
-    `paste-ui-multistate:<key>:1`, then `:2`. A key holding `:` or `%` is
-    encoded by `encodeURIComponent` in the name, so key `a`'s second strip and
-    key `a:1` (`paste-ui-multistate:a%3A1`) never share a group. Every strip
-    shows the selection. A key where any radio carries an authored name is left
-    exactly as authored.
-  - A `hashchange` or `popstate` to a fragment with no declared `key:value`
-    token (a plain `#anchor`, or the `#` of `<a href="#">`) keeps the current
-    selection; only a `popstate` to an entry with no fragment restores the
-    authored defaults. Foreign `key:value` tokens in the fragment are
-    preserved.
-  - An input change applies the selection before writing history, pushes a
-    `null` state, and keeps the selection applied if the browser refuses the
-    history write.
-  - Keys and values are written to the fragment with `encodeURIComponent` and
-    decoded when read, and each part of the reflected class
-    `multistate-state-<key>-<value>` is encoded the same way: a value
-    `north america` is written `north%20america` in both. Keys and values made
-    only of ASCII letters, digits and `-_.!~*'()` are unchanged. Text holding
-    a lone surrogate, which `encodeURIComponent` refuses, has each surrogate
-    written `%uXXXX`; such a selection works on the page but is not restored
-    from the address.
+  - Ports the original implementation under `paste.ui.multistate`: the same
+    state tables, selection/deselection passes, native `change` subscriptions,
+    selected-panel attributes/classes, history handlers and public return object.
+  - One native radio represents each key/value. Several panels may share that
+    pair. Separate controls with the same key/value are not mirrored strips.
+  - Author ordinary names and label ids. Existing names and ids are preserved;
+    missing names receive `key + '$' + moduleGuid`, and missing ids receive a
+    generated GUID. A label still needs an authored association with its input.
+  - CSS owns presentation. The selector is
+    `input[data-multistate-key]:checked ~ [data-multistate-state]`.
+    Author that reveal rule; the module stylesheet only supplies hiding rules.
+    Radios, labels and panels must have the sibling relationship the rule needs.
+    For a working no-JavaScript baseline, author native group names and
+    value-specific `:checked` reveal rules too. Surface's multistate spec has
+    the complete example. No wrapper or layout inference is involved.
+  - Initial selection combines valid fragment values with each dimension's
+    authored checked default. A later explicit state fragment selects its named
+    dimensions and clears omitted dimensions. Ordinary anchors, including `#`,
+    keep the current selection. Back to an address with no `#` restores defaults.
+  - A radio change carries the other selected dimensions and any foreign
+    `key:value` data forward. It calls `pushState` before announcing the selection. The write does not navigate or generate a native `hashchange`.
+    If history refuses the write, panel reflection still follows the radio.
+  - Keys and values use `encodeURIComponent` in fragments and class suffixes;
+    malformed URI tokens are ignored. Author valid Unicode strings. There is
+    no custom `%uXXXX` encoding. Both native history event families stay bound;
+    an unchanged transition emits no duplicate state event.
+  - The inherited API remains: `initialize(force)`, `events.multistatepop`,
+    `getCurrentState()`, `serializeState()` and `deserializeState()`.
+    State dictionaries have no prototype, so keys such as `__proto__` are data.
+    `getCurrentState()` and event payloads share the current dictionary, as in
+    the original; treat it as read-only. A changed transition publishes a new dictionary.
+    There is no snapshot-copy layer or queued reentrant-change protocol.
+  - `initialize(true)` releases old change subscriptions and reflection, rescans
+    the document and resolves the current fragment/defaults. Native form reset
+    is not a state/history transition; this port adds no reset listener or timer.
+    Use the radio interaction or navigation for enhanced state changes.
 - **marquee**
   - `paste.ui.marquee.init(root)` and its controller are removed; roots bind
     once, when the module is defined.
@@ -1011,34 +1234,15 @@ reduced. Native smooth scrolling follows the page's CSS motion policy.
     percentage `column-gap`), so percentage gaps are honoured. While the list
     runs, a change to the computed gap — a breakpoint, or a viewport-relative
     gap across a resize — moves the running pitch with it.
-  - Item geometry under a transformed or zoomed ancestor is written in the
-    list's own layout pixels, so a scaled list no longer overlaps its items or
-    stays static.
+  - Item geometry under an axis-aligned scaled or zoomed ancestor is written in the
+    list's own layout pixels, with independent horizontal and vertical scales.
 - **heroscroll**
-  - No longer assigns generated ids to heroes. A `data-hero-hashclick` hero
-    navigates to its next element sibling, resolved when the click happens,
-    when that sibling is a hero: to a hero with an id by fragment navigation
-    (the address, history, `:target` and `hashchange` follow, with the page's
-    scroll CSS), and to the fragment already current by `scrollIntoView()`. A
-    hero without an id gets a history entry of its own (`history.pushState`
-    with the current state) before `scrollIntoView()`, so each Back returns to
-    the hero the visitor left in every engine. The entry keeps the address,
-    except that a fragment naming an element as the browser resolves it (in a
-    quirks-mode document, an `<a name>` that matches once each code point is
-    folded to the lowercase of its uppercase form counts) or the top of the
-    document becomes the empty fragment (`page#`): the address no longer names
-    what the entry does not show, and no engine scrolls to it on Back or
-    Forward. Other fragments, such as `paste.ui.multistate` tokens, are kept,
-    and an address with a `#` keeps it, so the entry never reads as the page's
-    bare first entry unless the visitor was on that entry. The hero carries
-    `paste-ui-hero-destination` until the next hash click, and the section nav
-    stylesheet's clearance applies to it. It no longer dispatches a
-    `'hashchange'` paste event with `{newURL, updateHash: false}`, which
-    nothing consumed. A click whose path — the composed path, so controls
-    inside shadow roots count — passes through a link (`a[href]`, `area[href]`,
-    an SVG link), a button, a form control, a label, a summary, media controls,
-    an embedded frame or object, `[tabindex]` or `[contenteditable]` inside the
-    hero is never prevented.
+  - Whole-hero background-click navigation has been removed. Remove
+    `data-hero-hashclick` and use an authored `<a href="#section-id">` with
+    a matching destination `id` wherever navigation is wanted. The browser
+    owns the URL, history, target and scrolling. There is no replacement
+    navigation module, generated destination ID or custom history entry.
+    Hero effects and height handling remain independent of navigation.
   - Hero bounds are re-measured when the body changes size and once when the
     document finishes loading, so an image, a font or content arriving above a
     hero no longer leaves its content at the fade of its earlier position.
@@ -1049,31 +1253,34 @@ reduced. Native smooth scrolling follows the page's CSS motion policy.
   - `data-hero-min-opacity` is a floor (0–1) the fade writes, not a cut-off.
     A percentage or keyword `background-position` no longer offsets the
     parallax.
-- **form**: when `FormData` or `paste.io` throws, or `paste.io` starts no
+- **form_validity**: ordinary forms retain validity reflection, generated ids
+  when absent, and invalid/`data-not-allowed="true"` submission blocking. The
+  obsolete non-native validity polyfill remains retired.
+- **form_html**: marked `[data-paste-form]` forms retain native validation and
+  background submission through the shared fragment operation. When `FormData`
+  or `paste.io` throws, or `paste.io` starts no
   request, the submit is not taken over: it proceeds natively and the target
   is never marked busy.
-- **throttle**: wrappers created without an id never share a window. A string
-  id names a shared window by its text; any other truthy id names one by
-  identity. The trailing call uses the latest arguments; leading mode also
-  fires one trailing call when calls arrived during the window. A window opens
-  only once its timer is scheduled.
-- **animation-frame**: treat the id `request()` returns as opaque and cancel
-  it only through `cancel()`. Neither `request()` nor the new
-  `requestPhased(read, write)` runs a callback before it returns. Each batch
-  runs every phased read, then every plain callback, then every phased write.
-  Batches ride the unprefixed `requestAnimationFrame` and
-  `cancelAnimationFrame`; the timer fallback for hosts without them and the
-  prefixed APIs are removed. Callbacks receive the host frame's time on the
-  `performance.now()` clock, strictly increasing from one batch to the next;
-  a page wrapper that calls back without a time gets `performance.now()`. A
-  page wrapper that calls back inside `requestAnimationFrame` itself (a
-  synchronous flush helper) has that call ignored, and one that throws has
-  its error dropped; either way that batch runs from a timer 20 ms later
-  instead, and `request()` still returns normally. When such a wrapper has
-  also registered a real frame, whichever of the frame and the timer arrives
-  first delivers the batch and the other runs nothing, so each batch is
-  delivered once; the timer is a little longer than a frame, so the real
-  frame usually wins.
+- **throttle**: the opening call owns the window. Default mode runs once at
+  the end with that call's context and arguments. `runFirst` runs once at the
+  start, with no trailing call. Intervening calls are discarded; reentry from
+  the callback is still inside the occupied window. Idless wrappers share
+  by function source plus period. Truthy explicit ids share by property-key
+  coercion, including numeric/string equivalents. A timer
+  registration error releases the window and propagates. Callback cleanup
+  runs even if the callback throws. No synthetic synchronous-timer support. Migration: latest-argument and leading-plus-
+  trailing behavior from the earlier refactor is removed.
+- **animation-frame**: keep request ids opaque and cancel through `cancel()`.
+  Each native asynchronous batch runs phased reads, plain callbacks, then
+  phased writes. Native frame timestamps pass through unchanged, including
+  zero or repeated values; no fabricated monotonic clock. Missing RAF uses a
+  16 ms timer cadence with `performance.now()` (or Date). Missing cancellation still
+  suppresses stale callbacks. Callback errors are reported asynchronously
+  without discarding other work. Page wrappers must preserve the native
+  asynchronous API contract; synchronous/throwing wrapper repair is removed.
+
+The source itself carries these costs and contracts. Minification is optional;
+no optimizer is required to remove unnecessary closures, walks or listeners.
 
 ## Why Source-Only?
 
@@ -1087,6 +1294,223 @@ The [`paste-assetgraph`](https://github.com/PasteStack/paste-assetgraph) pipelin
 - Fingerprinting / hashing
 - Manifest generation
 
+## Runtime cost and content lifetime
+
+Smoothscroll discovery uses weak identity membership where `WeakSet` is
+available: repeated `init()` does not rescan previously bound links for each
+candidate or retain removed anchors. Its native-history, easing, cancellation
+and optional API contracts are unchanged. Hosts without `WeakSet` keep the
+legacy membership fallback.
+
+Sticky navigation retains original declaration state weakly where `WeakMap`
+is available. A child-list observer releases detached navs from active tracking
+and target observation, and restores an already-known nav when reinserted,
+including its original own-position threshold. It does not discover new navs;
+call `init()` for those. Without `MutationObserver`, call `init()` after content
+replacement to refresh membership. Without `WeakMap`, the legacy registry
+remains. Minimum-width-ineligible navs do not schedule scroll frames; resize,
+load and size observation still refresh eligibility.
+
+Autogrow initialization batches independent fields before writing their heights;
+nested legacy `.autogrow` ancestors are measured after their descendants grow. Input and
+legacy keyup still grow the individual field synchronously; deletion never
+shrinks it. Progressive-resolution observer delivery looks up the affected host
+where weak indexing is available, retaining the original scan fallback when
+that facility is unavailable or refuses construction.
+
+Image limits belong to each instance, not to the page. An image sequence admits
+up to six in-flight preparations and uses a 32 MiB estimate for retained decoded
+pixels per sequence. Progressive resolution permits one pending preparation per
+host. Multiple active instances multiply those allowances; neither limit is a
+page-wide network or native decoded-memory cap. Native request coalescing and
+decode caching are browser-owned. Use authored lazy loading for offscreen image
+hosts where appropriate, load only needed modules, and size many-instance pages
+against their actual media. No global scheduler or URL-only preparation cache
+is imposed: CORS/referrer policy, ownership and representation validation remain
+part of each preparation's contract.
+
+## Native boundary corrections
+
+Ordinary forms keep native interactive validation and authored `novalidate` /
+`formnovalidate` bypasses. Legacy validity reflection and `data-not-allowed="true"`
+submission blocking remain. Background forms reserve their ancestor reply target
+before constructing `FormData`, whose synchronous `formdata` event may reenter
+submission. Only one request may own a target. GET and urlencoded POST normalize
+filename line breaks like native form submission; multipart stays with FormData.
+
+Multistate also supports radio-only dimensions: `data-multistate-value` panels
+are optional. Native sibling CSS can supply the entire presentation while
+history, defaults and state reflection still recognize each declared radio.
+
+An invalid attribute name in an IO reply variable binding is skipped locally;
+other bindings continue. There is no console message or new event for that
+malformed authoring. Other DOM failures still propagate.
+
+## Restored modules and responsibility boundaries
+
+These modules retain their original attribute names and optional entry points,
+under `paste.ui.*`. Load only the behaviors the page declares; `forForms()` in
+Surface still opts into autogrow alone.
+
+| Module | Authored contract | Responsibility |
+| --- | --- | --- |
+| `allowed_chars` | `data-allowed-char-expr`, `data-disallowed-char-expr`; `initialize(force)` | Filter typed characters. Native `pattern` and server validation still validate complete values. |
+| `form.form_autosave` | Form `data-ui-autosave="field,field"`, `data-autosave-action`; `init(parent)` | Detect edits, schedule saves and acknowledge sent values. Applies its successful reply. |
+| `imageupload` | File `data-image-upload-action`; `data-image-upload-for` pairs URI, preview and message; `bind(fieldOrForm, form)` | Upload the chosen file and reflect the returned URI. Resolution/sequence modules do not upload files. |
+| `js_tooltip` | `data-ui-js-tooltip="class=html\|class=html"`; `init(parent)` | Display authored rich help on hover/focus. Use `title` for plain native help. |
+| `multistate` | Named native radios with `data-multistate-key` | Reflect selection into URL/history and optional panel markers. Native `:checked`, `+` and `~` remain available without JavaScript. |
+| `navigate_on_change` | Control `data-navigate-on-change="true"` | Navigate to its value on change. Ordinary destinations remain anchors. |
+| `prevent_double_submit` | Submit input/button `data-prevent-double-submit="true"`; `init(parent)` | Guard native navigation, keeping the first submitter in the payload. Canceled submits remain the canceling handler's responsibility. |
+| `select` | `select[data-paste-select]` followed by `[data-paste-select-value]`; `init(parent)` | Reflect the visible option label for custom CSS while native selection, focus and form behavior remain intact. Generalized from the original branded select. |
+| `sortable` | `data-paste-sortable` group, `.paste-ui-sortable` blocks, `draggable="true"` slots; `bind(parent, callbacks)` | Swap slot contents, retaining block/order-field positions, node identity and listeners. |
+| `update_text_on_input_change` | `data-update-variable-name`, `data-update-variable-names`; `init`, `setVariable`, `updateOutputs` | Substitute text-node placeholders. It does not interpret field values as HTML or update attributes. |
+
+Autosave preserves the first-edit/change/blur immediate save and a fixed
+ten-second window for later typing. It posts native FormData, including
+successful unmonitored fields, while only the listed names trigger saves.
+`autosaving` means a request is pending, `not-autosaving` means it is idle,
+and `not-autosaved` means current values are not acknowledged (or the original
+same-action form has not yet been acknowledged). A failure stays dirty until
+another edit/change/blur retries; it does not start an endless retry loop.
+Unloading the page is not a delivery guarantee.
+
+Autosave applies the original `data.modules[name].markup` with `data-update-contents`,
+and `data.variables` with `data-update-attribute`. It also accepts Surface's
+`data.fragments` and `data-paste-io-reply-fragment-target` / `-bind` hooks.
+Reply placement uses `paste.ui.utilities.io-html-fragment`; autosave owns the
+save acknowledgment and applies replies only while its originating form is live.
+Both HTTP status and `meta.code` must be 200. Original scalar variables accept strings,
+numbers and booleans; Surface bindings retain their string-only contract.
+When both vocabularies appear, original fragments precede Surface fragments, then
+original bindings precede Surface bindings. Reply HTML is trusted server markup.
+
+`form_validity` retains native validity reflection. `form_html` owns explicit
+background form submission, while `io-html-fragment` reserves its destination
+against competing fragment loads until the owned operation settles or is
+superseded. `prevent_double_submit`
+protects a native navigation and releases its own disabled controls on reset or
+pageshow. A canceled background submission does not leave a native navigation lock.
+
+Text updates preserve the `%(name)s` syntax and optional
+`data-update-variable-default` and `data-original-value`. Only authored text
+nodes are templates: attribute, script, style and textarea interpolation is
+unsupported. Values such as `0` remain values; unchecked checkboxes clear their
+old value. `setVariable` stages a value; `updateOutputs` applies it. Initial
+native values are read at binding, and `init(parent)` discovers new markup.
+
+Image upload requires an authored file ID and three companions inside its form:
+`data-image-upload-uri`, `data-image-upload-preview`, and
+`data-image-upload-message`, each with `data-image-upload-for="file-id"`.
+`data-image-upload-param` overrides the multipart field name. A successful
+`{meta:{code:200},data:"path"}` reply writes the hidden URI and dispatches a
+bubbling native `change`; the preview combines `data-image-url-prefix` with
+that path. Empty/error replies restore `data-image-upload-default-src` (or the
+initial preview source). `data-image-upload-loading` marks the file and message;
+`data-image-upload-error-message` carries a server rejection or default message.
+`data-image-upload-timeout` declares the request deadline in decimal
+milliseconds, default 30,000, `0` for none.
+The optional `modules/imageupload/imageupload` stylesheet displays error/loading
+messages; its silent `mixin` import supplies `paste-ui-imageupload-message()`
+with a configurable loading label. Author an accessible status element and the
+remaining image presentation.
+
+Tooltip content is trusted authored markup. Its default optional stylesheet
+is `modules/js_tooltip/js_tooltip`; `modules/js_tooltip/mixin` is silent and
+provides `paste-ui-js-tooltip()` for a consumer-owned selector. No global body
+positioning, site-specific image-upload skin or loader asset is installed by base.
+
+## Native select appearance
+
+`paste.ui.select` generalizes the original branded select: a real select supplies selection,
+keyboard interaction and form values; an adjacent text-only mirror supplies an
+optional CSS face. Load `modules/select/select.scss` for `.paste-ui-select`, or
+include the silent `paste-ui-select()` mixin within your wrapper selector.
+
+```html
+<label>Region
+  <span class="paste-ui-select">
+    <select name="region" data-paste-select>
+      <option value="ct">Connecticut</option>
+      <option value="ny">New York</option>
+    </select>
+    <span data-paste-select-value aria-hidden="true"></span>
+  </span>
+</label>
+```
+
+The native control stays visible without JavaScript and in forced-colors mode.
+The enhancement reads the visible option label, never changes the submitted
+value, and reflects completed native resets. Whitespace between siblings is
+allowed. Multiple selects, listboxes and missing mirrors stay native.
+`init(parent)` includes a root select and can refresh authored option/value
+changes without duplicating listeners. Call it after inserting new controls.
+Programmatic assignment needs change or init; there are no observers or polling.
+Surface's Select template emits this contract, with caller-authored
+option/optgroup content.
+
+## Verification browser matrix
+
+`bash tests/run-all-checks.sh` runs the Node suite, real assetgraph Sass checks
+with readable and minified CSS, native consistency/responsibility checks,
+source/minified select checks, and the complete Java Elements and marquee
+suites in Chromium, Firefox and WebKit.
+CI provisions paste-assetgraph 0.3.1 and Playwright 1.41.0, with Chromium
+151.0.7922.34, Firefox 121 and WebKit 17.4. Logs and run-scoped fixture identities
+are retained even when a check fails. Local runners require the documented
+runtime paths; they do not install dependencies themselves.
+
+This matrix is evidence for the named builds. Sites targeting other versions
+should validate their authored CSS and native navigation there.
+
 ## License
 
 Apache License, Version 2.0. See `LICENSE` and `NOTICE.md`.
+
+## Ordered playback
+
+ImageSequence.playback defaults to SequencePlayback.Direct, preserving immediate
+scroll ownership. SequencePlayback.Queued(framesPerSecond = 30) emits
+data-sequence-playback="queued" and data-sequence-playback-fps (integer 1..120).
+Hand-authored queued markup may omit the rate for 30 fps. Invalid modes or rates
+are rejected; a rate requires queued mode.
+
+Queued playback retains a running intro and then advances through the scroll
+range from the displayed completed intro endpoint to the latest scroll destination.
+Without a completed intro, travel starts at the authored scroll start. Different
+intro and scroll endpoints are connected by every intervening catalog frame. It advances
+at most one catalog index per presentation pass and waits for readiness.
+Input updates the remaining destination; it does not accumulate obsolete input
+events. Playback continues after input stops, reverses from its current cursor,
+and rests when the destination is reached. A pending frame wakes on resource
+completion rather than an idle frame loop. Intro readiness remains bounded;
+an intro unable to finish retires at its declared duration plus 15 seconds.
+Starting after navigation or skipping an intro preserves the existing startup
+and history rules. Reduced motion retains the static baseline. A hidden
+document retires its intro and suspends queued travel until fresh measurement.
+
+This policy changes presentation only. Native scrolling and authored layout
+remain in charge of visibility; leaving a section does not force it to stay
+onscreen. Resource limits, resolution selection and readiness gates remain
+in force. Failed frames may prevent an ordered path completing; the last usable
+image remains. Queue completion does not imply decoded-cache eviction.
+
+## Form family module names
+
+Use `paste.ui.form.form_validity` for native validity reflection,
+`paste.ui.form.form_apply` for JSON submissions, and `paste.ui.form.form_html`
+for HTML reply replacement. Apply and HTML include validity as a dependency.
+Choose one submission owner per form. `FormSubmission` and its emitted HTML
+remain unchanged: `Native`, `Apply`, and `Html` describe behavior, not file paths.
+
+Load the canonical modules directly. The former top-level form, apply,
+formhtml and autosave JavaScript entries have been removed; no compatibility
+includes remain. Autosave is `paste.ui.form.form_autosave`, at
+`modules/form/form_autosave/form_autosave.js`, with its own trigger and request
+lifetime. Its request deadline defaults to 30 seconds, overridden per form by
+`data-autosave-timeout`. Forms still require explicit
+autosave declarations; loading the module does not opt ordinary forms in.
+
+Existing classes, data attributes and `paste.ui.formhtml:failed` keep their
+spelling. The general form stylesheet and field mixins remain in `modules/form`.
+Import Apply styles from `modules/form/form_apply/form_apply.scss` or its silent
+`_mixin.scss`; the former `modules/apply` forwarding styles have been removed.

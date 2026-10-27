@@ -128,6 +128,9 @@
  *       srcset or sizes, or a picture ancestor. selfIncluded counts a
  *       host that is itself a picture too; imagesequence passes it,
  *       progressiveresolution does not.
+ *   paintedBox(host, rect, style) — the sizing area for an image or
+ *       background, using its owner record, measured rectangle and
+ *       computed style. Both resolution owners use the same policy.
  *   policyWatchTargets(host) — the host plus every ancestor element
  *       that is a size container.
  *   listedTransition(element) — the host's background-image
@@ -188,6 +191,7 @@ paste['define'](
             $String = String,
             $fromCharCode = $String['fromCharCode'],
             $parseInt = parseInt,
+            $parseFloat = parseFloat,
             REPLACEMENT = $fromCharCode(0xFFFD),
             urlTokens = /url\(\s*(?:"((?:[^"\\]|\\[\s\S])*)"|'((?:[^'\\]|\\[\s\S])*)'|([^()"'\s]+))\s*\)/gi,
             identifierChar = /[\-\w\\]/,
@@ -217,6 +221,132 @@ paste['define'](
             // image reads 0x0 in one engine and a default box in
             // another.
             vectorSource = /^data:image\/svg\+xml[;,]|\.svgz?(?:[?#]|$)/i,
+
+            // A computed length in px; anything unreadable is none.
+            computedLength = function (style, name) {
+                var length = $parseFloat(style.getPropertyValue(name));
+                return length > 0 ? length : 0;
+            },
+
+            // The first layer's keyword of a layered background value.
+            firstLayer = function (value) {
+                return (value || '').split(',')[0].trim();
+            },
+
+            // The viewport, without scrollbars: the root element's
+            // client box. In quirks mode neither the root element nor
+            // the body reports it in every engine — either can answer
+            // its own box — so the window's inner size, scrollbars
+            // included, stands in.
+            viewportBox = function () {
+                var root = $doc.compatMode === 'BackCompat' ? null : $doc.documentElement;
+                return {
+                    width: (root && root.clientWidth) || $w.innerWidth || 0,
+                    height: (root && root.clientHeight) || $w.innerHeight || 0
+                };
+            },
+
+            // An img's content box, or a background's origin box for its
+            // first layer's attachment — over the scrollable content for
+            // 'local' on a box that scrolls — from the border-box rect
+            // and the pass's own style read. Padding, border and
+            // scrollable size are layout lengths: where the rect differs
+            // from the layout size by more than rounding, a transform
+            // scales the rendered box, and the lengths scale with it.
+            originBox = function (host, rect, style, attachment) {
+                var element = host.element,
+                    origin = 'content-box',
+                    overflow,
+                    local = false,
+                    offsetWidth,
+                    offsetHeight,
+                    borderX,
+                    borderY,
+                    paddingX = 0,
+                    paddingY = 0,
+                    scaleX = 1,
+                    scaleY = 1,
+                    width,
+                    height;
+                if (host.property === 'background-image') {
+                    // A box overflow does not apply to — an inline box —
+                    // reports no client or scrollable size: it keeps its
+                    // origin box.
+                    overflow = style.getPropertyValue('overflow-x');
+                    local = attachment === 'local' && overflow !== '' &&
+                        overflow !== 'visible' && overflow !== 'clip' &&
+                        element.clientWidth > 0 && element.clientHeight > 0 &&
+                        element.scrollWidth > 0 && element.scrollHeight > 0;
+                    origin = firstLayer(style.getPropertyValue('background-origin'));
+                }
+                if (origin === 'border-box' && !local) {
+                    return rect;
+                }
+                borderX = computedLength(style, 'border-left-width') +
+                    computedLength(style, 'border-right-width');
+                borderY = computedLength(style, 'border-top-width') +
+                    computedLength(style, 'border-bottom-width');
+                if (origin === 'content-box') {
+                    paddingX = computedLength(style, 'padding-left') +
+                        computedLength(style, 'padding-right');
+                    paddingY = computedLength(style, 'padding-top') +
+                        computedLength(style, 'padding-bottom');
+                }
+                if (!local && borderX + paddingX === 0 && borderY + paddingY === 0) {
+                    return rect;
+                }
+                offsetWidth = element.offsetWidth;
+                offsetHeight = element.offsetHeight;
+                if (offsetWidth > 0 && $abs(rect.width - offsetWidth) > 1) {
+                    scaleX = rect.width / offsetWidth;
+                }
+                if (offsetHeight > 0 && $abs(rect.height - offsetHeight) > 1) {
+                    scaleY = rect.height / offsetHeight;
+                }
+                if (local) {
+                    // The scrollable size is the padding box of the
+                    // content, past the border; the border box adds it
+                    // back.
+                    width = element.scrollWidth - paddingX +
+                        (origin === 'border-box' ? borderX : 0);
+                    height = element.scrollHeight - paddingY +
+                        (origin === 'border-box' ? borderY : 0);
+                } else {
+                    width = (rect.width / scaleX) - borderX - paddingX;
+                    height = (rect.height / scaleY) - borderY - paddingY;
+                }
+                width *= scaleX;
+                height *= scaleY;
+                return {width: width > 0 ? width : 0, height: height > 0 ? height : 0};
+            },
+
+            // The box the image is sized against, from the border-box
+            // rect and the pass's own style read: an img's content box;
+            // a background's positioning area — the box its
+            // background-origin names (the padding box by default),
+            // measured over the whole scrollable content for a 'local'
+            // attachment on a box that scrolls (one with a client box
+            // and a scrollable size). A 'fixed' attachment paints
+            // against the viewport where the engine honours it and
+            // against that same origin box where it paints 'scroll'
+            // instead, which this read cannot tell apart: the larger of
+            // the two in each dimension covers either — a larger fetch,
+            // never a blurrier image (an unrendered host keeps its empty
+            // box).
+            paintedBox = function (host, rect, style) {
+                var attachment = host.property === 'background-image' ?
+                        firstLayer(style.getPropertyValue('background-attachment')) : '',
+                    box = originBox(host, rect, style, attachment),
+                    viewport;
+                if (attachment !== 'fixed' || (rect.width === 0 && rect.height === 0)) {
+                    return box;
+                }
+                viewport = viewportBox();
+                return {
+                    width: box.width > viewport.width ? box.width : viewport.width,
+                    height: box.height > viewport.height ? box.height : viewport.height
+                };
+            },
 
             finite = function (value, name) {
                 if (typeof value !== 'number' || !$isFinite(value)) {
@@ -464,20 +594,23 @@ paste['define'](
                     remaining = representations.length,
                     candidate,
                     width,
-                    sufficient = null,
                     largestEligible = null;
                 while (remaining--) {
                     candidate = representations[index];
                     width = candidate['width'];
                     if (index === 0 || !capped || width <= cap) {
                         largestEligible = candidate;
-                        if (sufficient === null && width >= need) {
-                            sufficient = candidate;
+                        if (width >= need) {
+                            return candidate;
                         }
+                    } else {
+                        // The validated ladder is ascending: every
+                        // remaining upgrade is above this cap too.
+                        return largestEligible;
                     }
                     index += 1;
                 }
-                return sufficient || largestEligible;
+                return largestEligible;
             },
 
             // A URL written into a CSS declaration is serialized text:
@@ -1009,6 +1142,7 @@ paste['define'](
         imageresolution['descriptor'] = descriptor;
         imageresolution['representationsFor'] = representationsFor;
         imageresolution['needFor'] = needFor;
+        imageresolution['paintedBox'] = paintedBox;
         imageresolution['selectCandidate'] = selectCandidate;
         imageresolution['cssUrl'] = cssUrl;
         imageresolution['cssUrlSource'] = cssUrlSource;

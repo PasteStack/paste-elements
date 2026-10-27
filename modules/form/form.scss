@@ -1,0 +1,17 @@
+// Explicit default presentation; field aliases share the same declarations.
+@import "mixin";
+
+.#{$paste-prefix}-form-field,
+.#{$paste-prefix}-formfield {
+  @include paste-ui-form-field();
+}
+
+.#{$paste-prefix}-form-description,
+.#{$paste-prefix}-formfield-description {
+  @include paste-ui-form-description();
+}
+
+.#{$paste-prefix}-form-error,
+.#{$paste-prefix}-formfield-error {
+  @include paste-ui-form-error();
+}

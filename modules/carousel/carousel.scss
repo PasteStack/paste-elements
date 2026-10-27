@@ -1,0 +1,5 @@
+@import "mixin";
+
+.paste-ui-carousel {
+  @include paste-ui-carousel();
+}

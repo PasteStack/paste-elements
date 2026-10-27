@@ -597,7 +597,7 @@ function unexecuted(names, elementsResults, marqueeResults) {
 const elements = fs.readFileSync(path.join(__dirname, 'ElementsBrowserChecks.java'), 'utf8');
 const marquee = fs.readFileSync(path.join(__dirname, 'MarqueeBrowserChecks.java'), 'utf8');
 const names = fs.readdirSync(path.join(root, 'modules'), {withFileTypes: true})
-    .filter(entry => entry.isDirectory() && entry.name !== 'utilities' && entry.name !== 'io-reply-fragment-envelope')
+    .filter(entry => entry.isDirectory() && entry.name !== 'utilities')
     .map(entry => entry.name)
     .filter(name => fs.readdirSync(path.join(root, 'modules', name)).some(file => file.endsWith('.js')));
 

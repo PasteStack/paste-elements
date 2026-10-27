@@ -32,6 +32,17 @@ const pastestackJs = process.env.PASTE_CORE_JS;
  * enumerate what matters; serve-examples.test.cjs keeps the copies equal
  * to the declared srcs. */
 const identityPaths = [
+    '/js/paste/ui/fragment_navigation.js',
+    '/js/paste/ui/allowed_chars.js',
+    '/js/paste/ui/select.js',
+    '/js/paste/ui/form/form_autosave.js',
+    '/js/paste/ui/imageupload.js',
+    '/js/paste/ui/js_tooltip.js',
+    '/js/paste/ui/navigate_on_change.js',
+    '/js/paste/ui/prevent_double_submit.js',
+    '/js/paste/ui/sortable.js',
+    '/js/paste/ui/update_text_on_input_change.js',
+
     '/js/paste/paste.js',
     '/js/paste/guid.js',
     '/js/paste/util.js',
@@ -49,10 +60,10 @@ const identityPaths = [
     '/js/paste/ui/scrollscrub.js',
     '/js/paste/ui/progressiveresolution.js',
     '/js/paste/ui/imagesequence.js',
-    '/js/paste/ui/smoothscroll.js',
     '/js/paste/ui/multistate.js',
-    '/js/paste/ui/autogrow.js',
-    '/js/paste/io.js', '/js/paste/ui/form.js', '/js/paste/ui/scrollspy.js'
+    '/js/paste/ui/autogrow.js', '/js/paste/ui/smoothscroll.js',
+    '/js/paste/io.js', '/js/paste/ui/utilities/form-dom.js', '/js/paste/ui/utilities/io-html-fragment.js', '/js/paste/ui/form/form_validity.js', '/js/paste/ui/form/form_apply.js', '/js/paste/ui/form/form_html.js', '/js/paste/ui/scrollspy.js',
+    '/js/paste/ui/lazy_loader.js', '/js/paste/ui/carousel.js'
 ];
 
 // A request path resolves only inside the two known source roots: the
@@ -66,7 +77,7 @@ function confined(root, resolved) {
 function resolveLocal(requestPath) {
     if (requestPath.indexOf('/js/paste/ui/') === 0) {
         const basename = path.basename(requestPath, '.js');
-        const tier = requestPath.indexOf('/js/paste/ui/utilities/') === 0 ? 'utilities' : '';
+        const tier = requestPath.indexOf('/js/paste/ui/utilities/') === 0 ? 'utilities' : requestPath.indexOf('/js/paste/ui/form/') === 0 ? 'form' : '';
         return confined(elementsJs, path.normalize(path.join(elementsJs, tier, basename, basename + '.js')));
     }
     if (requestPath.indexOf('/js/paste/') === 0) {

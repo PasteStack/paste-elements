@@ -9,4 +9,6 @@
  */
 @import "mixin";
 
-@include paste-ui-imagesequence();
+:where([data-paste-imagesequence]) {
+  @include paste-ui-imagesequence();
+}

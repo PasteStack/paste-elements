@@ -1,0 +1,6 @@
+@import "../../base/variables";
+@import "mixin";
+
+.#{$paste-prefix}-select {
+  @include paste-ui-select();
+}

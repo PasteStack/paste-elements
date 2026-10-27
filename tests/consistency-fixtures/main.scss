@@ -1,0 +1,7 @@
+@import 'base/variables';
+@import 'base/base';
+
+// These checks intentionally exercise the opt-in component presentation.
+@import 'modules/form/form';
+@import 'modules/button/button';
+@import 'modules/address/address';

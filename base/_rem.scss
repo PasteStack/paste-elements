@@ -1,4 +1,6 @@
-$unit-default-px: $base-font-size;
+@import 'variables';
+
+$unit-default-px: $base-font-size !default;
 
 @function fix8_unit_to_px($val) {
   @if $val == auto {
@@ -28,21 +30,18 @@ $unit-default-px: $base-font-size;
     $n: length($val);
     $i: 1;
 
-    $px-list: ();
     $rem-list: ();
 
     @while $i <= $n {
-        $px-list: append($px-list, fix8_unit_to_px(nth($val, $i)));
         $rem-list: append($rem-list, fix8_unit_to_rem(nth($val, $i)));
         $i: $i + 1;
     }
 
-    //#{$prop}: $px-list;
     #{$prop}: $rem-list;
 }
 
 @function strip-units($number) {
-  @return $number / 1#{unit($number)};
+  @return $number / ($number * 0 + 1);
 }
 
 @function rem($sizeValue: $base-font-size) {

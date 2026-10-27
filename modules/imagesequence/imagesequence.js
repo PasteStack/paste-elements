@@ -34,7 +34,7 @@
  *    authored startup lead — the poster stands until every index the
  *    easing traverses inside that window is ready, and only then does
  *    the clock start; a set that cannot fund ends the intro once.
- *    Completion, skip, a scroll input, document hiding, or reduced
+ *    Direct playback: completion, skip, scroll, document hiding or reduced
  *    motion ends the phase and hands ownership to the live scroll
  *    position — a late intro completion never regains the source.
  *    'data-sequence-scrub-buffer-frames' is the authored scroll gate —
@@ -60,6 +60,13 @@
  *    committed only when strictly better.
  *    The device pixel ratio moving — a window dragged to another
  *    monitor, browser zoom — is an input of its own.
+ *
+ * Queued playback: data-sequence-playback=queued preserves a running intro,
+ * then plays the scroll range toward the newest destination. The optional
+ * data-sequence-playback-fps is an integer 1..120 (default 30). Each ready
+ * presentation advances at most one index, with bounded resource preparation;
+ * completion consumes that travel and stops clock work. Skip, history return
+ * and intro failure hand off directly. Native scrolling is never intercepted.
  *
  * Authoring
  *
@@ -199,6 +206,10 @@
  *       scope; it must match exactly one element carrying
  *       'data-paste-scrollscrub'. Default is the nearest
  *       ancestor-or-self carrying that marker.
+ *   data-sequence-playback — direct (default) or queued. Queued preserves
+ *       a running intro, then traverses to the latest scroll destination.
+ *   data-sequence-playback-fps — queued travel rate, integer 1..120,
+ *       default 30; malformed unless playback is queued.
  *   data-sequence-from     — catalog index at scroll progress 0;
  *       default 0.
  *   data-sequence-to       — catalog index at progress 1; default the
@@ -239,11 +250,11 @@
  *       still at the authored start.
  *   data-sequence-intro-easing — 'ease-in-out' (default) or 'linear'.
  *   data-sequence-intro-skip — optional. Absent, the intro has no skip
- *       control and any scroll, a hidden document, reduced motion,
+ *       control and, in direct mode, any scroll, a hidden document, reduced motion,
  *       failure, or completion still ends it. Present, a selector for
  *       exactly one authored button whose effective type is 'button'
  *       (type="button" written out: a button's default type is submit)
- *       and which is authored with the hidden attribute. Click, any
+ *       and which is authored with the hidden attribute. Click, direct-mode
  *       scroll, a hidden document, reduced motion, failure, or
  *       completion hands ownership to live scroll, and the intro does
  *       not replay on a history return. A skip declaration that
@@ -297,7 +308,9 @@
  * transition keep it; with none in flight, anything else is another
  * writer — a stylesheet !important rule outranking the inline frame
  * included, whatever transition the host declares — and the paint
- * reverts to what stood before it on the read that sees it.
+ * reverts to what stood before it only while its inline value and priority
+ * remain owned. A newer inline declaration is preserved; completion work
+ * yields until a fresh page input permits another presentation decision.
  * A pending claim requests its own verification passes for at most
  * five seconds of frame time from its first pending read — far longer
  * than a background-image transition runs. Past that bound no frame is
@@ -454,6 +467,11 @@ paste['define'](
             claimState = imageresolution['claimState'],
             prepare = imageresolution['prepare'],
             scrollOffset = scrollrange['scrollOffset'],
+            measureRange = scrollrange['measure'],
+            needFor = imageresolution['needFor'],
+            paintedBox = imageresolution['paintedBox'],
+            selectCandidate = imageresolution['selectCandidate'],
+            requestPhased = animation_frame['requestPhased'],
             motionReduced = mediaquery['motionReduced'],
             marker = 'data-paste-imagesequence',
             scrubMarker = 'data-paste-scrollscrub',
@@ -521,16 +539,13 @@ paste['define'](
             observed = null,
             observer = null,
             observerFailed = false,
-            // Whether the one pass is requested and has not yet run, and
-            // the running count of read phases — a reservation priced in
-            // one pass is reused only inside it.
+            // Whether the one pass is requested and has not yet run.
             frameRequested = false,
             // Whether this batch's read phase ran the pass and its write
             // phase has not yet: should a request that threw (see
             // schedule) still have queued its pair, it can land beside
             // the next one, and only one of them runs.
             passRead = false,
-            passNumber = 0,
             // Whether a demanded admission of the sequence the pass is
             // working on was refused for capacity: optional work —
             // speculation and sharpening — never admits behind it in
@@ -616,6 +631,12 @@ paste['define'](
                 } catch (ignore) {
                     // The wake checks its own identity when it fires.
                 }
+            },
+
+            retirePlaybackWake = function (sequence) {
+                stopTimer(sequence.playWakeId);
+                sequence.playWakeId = null;
+                sequence.playWakeAt = null;
             },
 
             pixelsFor = function (rep) {
@@ -715,6 +736,9 @@ paste['define'](
                 ratio = $w.devicePixelRatio || 1;
                 // The layout read happens once, last.
                 rect = host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+                if (rect && readable) {
+                    rect = paintedBox(sequence, rect, style);
+                }
                 width = rect ? rect.width : 0;
                 height = rect ? rect.height : 0;
                 if (cap !== policy.cap || fit !== policy.fit || ratio !== policy.devicePixelRatio ||
@@ -917,6 +941,12 @@ paste['define'](
             // ratio or the CSS sizing — authored width and height
             // attributes alone never pin a box CSS may size from the
             // image. A later base paint withdraws that pair first.
+            ownsBackground = function (sequence) {
+                var style = sequence.element.style;
+                return style.getPropertyValue('background-image') === sequence.ownedBackground &&
+                    style.getPropertyPriority('background-image') === sequence.ownedPriority;
+            },
+
             paint = function (sequence, index, rep) {
                 var element = sequence.element,
                     base = sequence.frames[index].width;
@@ -926,8 +956,15 @@ paste['define'](
                     if (rep.css === null) {
                         rep.css = cssUrl(rep.src);
                     }
-                    element.style.setProperty('background-image', rep.css,
-                        sequence.authoredInline ? sequence.authoredInline.priority : '');
+                    try {
+                        element.style.setProperty('background-image', rep.css,
+                            sequence.authoredInline ? sequence.authoredInline.priority : '');
+                    } finally {
+                        // A refusing writer can leave the old declaration or
+                        // write before throwing. Remember the actual result.
+                        sequence.ownedBackground = element.style.getPropertyValue('background-image');
+                        sequence.ownedPriority = element.style.getPropertyPriority('background-image');
+                    }
                     return;
                 }
                 if (rep.width > base) {
@@ -939,6 +976,7 @@ paste['define'](
                 }
                 withdrawSrcset(sequence);
                 element.src = rep.src;
+                sequence.ownedSrc = element.getAttribute('src');
             },
 
             // A painted representation becomes the displayed one at
@@ -1102,7 +1140,7 @@ paste['define'](
                 sequence.gateOpen = false;
                 sequence.initialIsFrameZero = false;
                 if (sequence.property === 'background-image') {
-                    if (sequence.painted) {
+                    if (sequence.painted && ownsBackground(sequence)) {
                         if (inline && inline.value) {
                             // An authored inline baseline comes back
                             // verbatim, priority included.
@@ -1117,7 +1155,7 @@ paste['define'](
                     }
                 } else {
                     withdrawSrcset(sequence);
-                    if (sequence.painted) {
+                    if (sequence.painted && element.getAttribute('src') === sequence.ownedSrc) {
                         element.setAttribute('src', sequence.authoredSrcAttribute);
                     }
                 }
@@ -1212,10 +1250,10 @@ paste['define'](
                     // An img writes sharper rungs as srcset width
                     // descriptors sized at the base's intrinsic width,
                     // so its intrinsic-size fits still gain density.
-                    need = imageresolution['needFor'](policy.width, policy.height,
+                    need = needFor(policy.width, policy.height,
                         frame.width, frame.height, policy.fit, policy.devicePixelRatio,
                         sequence.property === 'src');
-                    chosen = imageresolution['selectCandidate'](reps, need, policy.cap);
+                    chosen = selectCandidate(reps, need, policy.cap);
                     if (sourceAlive(sequence, chosen.src)) {
                         rep = chosen;
                     } else {
@@ -1309,6 +1347,10 @@ paste['define'](
                     set = [],
                     index = sequence.desiredIndex,
                     remaining = sequence.scrubBufferFrames;
+                if (sequence.queued) {
+                    low = $min(low, index);
+                    high = $max(high, index);
+                }
                 while (remaining-- && index >= low && index <= high) {
                     set.push(index);
                     index += sequence.direction;
@@ -1378,16 +1420,25 @@ paste['define'](
                     low,
                     high,
                     elapsed,
+                    unchanged,
                     remaining,
                     index;
+                unchanged = plan.built && plan.desired === desired && plan.direction === direction &&
+                    plan.phase === phase && plan.gateOpen === sequence.gateOpen;
+                // Admissions and evictions ask the same question inside
+                // one tick. Only an advancing intro clock needs its
+                // eased horizon calculated again.
+                if (unchanged && (!introPhase || plan.time === sequence.nowMs)) {
+                    return plan;
+                }
+                plan.time = sequence.nowMs;
                 if (introPhase && desired >= 0) {
                     elapsed = phase === 'intro' && sequence.introStartMs !== null ?
                             $max(0, sequence.nowMs - sequence.introStartMs) : 0;
                     lead = indexOnRange(intro.from, intro.to,
                         intro.easing($min(1, (elapsed + introHorizonMs) / intro.durationMs)));
                 }
-                if (plan.built && plan.desired === desired && plan.direction === direction &&
-                        plan.phase === phase && plan.gateOpen === sequence.gateOpen && plan.lead === lead) {
+                if (unchanged && plan.lead === lead) {
                     return plan;
                 }
                 index = order.length;
@@ -1444,6 +1495,10 @@ paste['define'](
                 } else {
                     low = $min(sequence.scrollFrom, sequence.scrollTo);
                     high = $max(sequence.scrollFrom, sequence.scrollTo);
+                    if (sequence.queued) {
+                        low = $min(low, desired);
+                        high = $max(high, desired);
+                    }
                 }
                 index = desired + direction;
                 while (ahead-- && index >= low && index <= high) {
@@ -1568,8 +1623,9 @@ paste['define'](
                 return into;
             },
 
-            // The reservation of the standing presentation, priced once
-            // per pass and set: feasibility, eviction protection and
+            // The reservation of the standing presentation, reused until
+            // its set, policy, sources or ownership changes. Feasibility,
+            // eviction protection and
             // admission all ask the same question, and only an ownership
             // or display change (hold, release, setDisplayed) can move
             // the answer inside a pass. commitUpgrade's as-if pricing is
@@ -1578,10 +1634,12 @@ paste['define'](
                 if (standingRep !== undefined) {
                     return priceSet(sequence, set, policy, standingRep, sequence.asIfPricing);
                 }
-                if (sequence.reservationSet !== set || sequence.reservationPass !== passNumber) {
+                if (sequence.reservationSet !== set || sequence.reservationPolicy !== policy.version ||
+                        sequence.reservationSources !== sequence.sourceVersion) {
                     sequence.reservation = priceSet(sequence, set, policy, undefined, sequence.pricing);
                     sequence.reservationSet = set;
-                    sequence.reservationPass = passNumber;
+                    sequence.reservationPolicy = policy.version;
+                    sequence.reservationSources = sequence.sourceVersion;
                 }
                 return sequence.reservation;
             },
@@ -1636,6 +1694,7 @@ paste['define'](
                     direction = sequence.direction,
                     scratch = sequence.scratch,
                     groups = scratch.groups,
+                    groupList = scratch.groupList,
                     pinned = scratch.pinned,
                     chosen = scratch.picked,
                     stamp = nextStamp(sequence),
@@ -1646,8 +1705,10 @@ paste['define'](
                     src,
                     group,
                     rank,
+                    groupIndex,
                     best,
                     bestRank;
+                groupList.length = 0;
                 for (key in prepared) {
                     if (prepared[key] !== undefined) {
                         member = $Number(key);
@@ -1666,7 +1727,7 @@ paste['define'](
                                 ((member - desired) * direction < 0 ? 1 : 0);
                             group = groups[src];
                             if (group === undefined) {
-                                group = {stamp: 0, count: 0, rank: 0, bytes: 0};
+                                group = {src: src, stamp: 0, count: 0, rank: 0, bytes: 0};
                                 groups[src] = group;
                             }
                             if (group.stamp !== stamp) {
@@ -1674,6 +1735,7 @@ paste['define'](
                                 group.count = 1;
                                 group.rank = rank;
                                 group.bytes = pixelsFor(record.rep);
+                                groupList.push(group);
                             } else {
                                 group.count += 1;
                                 group.rank = $min(group.rank, rank);
@@ -1684,14 +1746,17 @@ paste['define'](
                 while (freed < excess) {
                     best = null;
                     bestRank = -1;
-                    for (src in groups) {
-                        if (groups[src] !== undefined) {
-                            group = groups[src];
-                            if (group.stamp === stamp && chosen[src] !== stamp && pinned[src] !== stamp &&
-                                    group.count === holds[src] && group.rank > bestRank) {
-                                best = src;
-                                bestRank = group.rank;
-                            }
+                    // Only groups retained in this pass can free room.
+                    // The reusable lookup also remembers old resources;
+                    // scanning it would grow the hot loop with playback.
+                    groupIndex = groupList.length;
+                    while (groupIndex--) {
+                        group = groupList[groupIndex];
+                        src = group.src;
+                        if (chosen[src] !== stamp && pinned[src] !== stamp &&
+                                group.count === holds[src] && group.rank > bestRank) {
+                            best = src;
+                            bestRank = group.rank;
                         }
                     }
                     if (best === null) {
@@ -1802,22 +1867,31 @@ paste['define'](
             },
 
             schedule = function () {
-                if (frameRequested) {
+                if (!frameRequested) {
+                    frameRequested = true;
+                    requestPhased(readPass, writePass);
+                }
+            },
+
+            armPlaybackWake = function (sequence, at) {
+                var due = sequence.playAt === null ? at : sequence.playAt + sequence.playInterval,
+                    wakeId;
+                if (sequence.playWakeId !== null && sequence.playWakeAt === due) {
                     return;
                 }
-                // The flag is set before requesting so the pass is armed
-                // once per frame; a request made while the pass runs
-                // lands in the next frame. By its contract the request
-                // never throws. Defence in depth: an animation_frame that
-                // throws anyway clears the flag, so the next input asks
-                // again rather than waiting forever on a frame nothing
-                // armed.
-                frameRequested = true;
-                try {
-                    animation_frame['requestPhased'](readPass, writePass);
-                } catch (refused) {
-                    frameRequested = false;
-                }
+                retirePlaybackWake(sequence);
+                wakeId = startTimer(function () {
+                    if (wakeId === null || sequence.playWakeId !== wakeId) {
+                        return;
+                    }
+                    sequence.playWakeId = null;
+                    sequence.playWakeAt = null;
+                    if (sequence.playActive && !sequence.faulted && !$doc.hidden) {
+                        schedule();
+                    }
+                }, $max(0, due - at));
+                sequence.playWakeId = wakeId;
+                sequence.playWakeAt = due;
             },
 
             dirty = function (sequence) {
@@ -1834,6 +1908,7 @@ paste['define'](
             // the next read phase reads it again; a scroll alone re-reads
             // the policy only for a sequence near the viewport.
             input = function (sequence, policyInput) {
+                sequence.yielded = false;
                 sequence.unwinnable = null;
                 sequence.deadGateDesired = -1;
                 if (policyInput) {
@@ -2011,6 +2086,8 @@ paste['define'](
                     aliasIndex = aliases ? aliases.length : 0,
                     index,
                     existing;
+                // Readiness can change without replacing an owned record.
+                sequence.reservationSet = null;
                 // A completion proving the painted URL is proof of
                 // what is painted, wherever it was requested from.
                 if (sequence.displayedRep && sequence.displayedRep.src === rep.src) {
@@ -2286,7 +2363,7 @@ paste['define'](
             // nor skip a later step. The scene is left dirty: a pass the
             // caller already runs, or schedules, recomputes the desire
             // from the live scroll position.
-            endIntro = function (sequence) {
+            endIntro = function (sequence, completed) {
                 var intro = sequence.intro,
                     skip = intro ? intro.skip : null,
                     subscription = sequence.skipSubscription;
@@ -2326,6 +2403,8 @@ paste['define'](
                 sequence.introDeadlineId = null;
                 sequence.introDeadlineAtMs = null;
                 sequence.phase = 'scroll';
+                sequence.playCursor = sequence.queued ? (completed ? sequence.displayedIndex : -1) : null;
+                sequence.playAt = null;
                 // The intro-to-scroll handoff is a fresh presentation
                 // decision: an authored scrub gate verifies the live
                 // position's set before the next change commits.
@@ -2374,11 +2453,19 @@ paste['define'](
                     sequence.introStartMs = now;
                 }
                 elapsed = now - sequence.introStartMs;
-                if (elapsed >= intro.durationMs) {
-                    endIntro(sequence);
+                if (elapsed >= intro.durationMs && (!sequence.queued || sequence.displayedIndex === intro.to ||
+                        elapsed >= intro.durationMs + introWaitDeadlineMs)) {
+                    endIntro(sequence, sequence.displayedIndex === intro.to);
                     return;
                 }
                 index = indexOnRange(intro.from, intro.to, intro.easing($min(1, elapsed / intro.durationMs)));
+                if (sequence.queued) {
+                    if (sequence.displayedIndex < 0) {
+                        index = intro.from;
+                    } else if (index !== sequence.displayedIndex) {
+                        index = sequence.displayedIndex + (intro.to >= intro.from ? 1 : -1);
+                    }
+                }
                 sequence.desiredIndex = index;
                 if (index !== sequence.displayedIndex) {
                     commit(sequence, index, sequence.prepared[index], policy);
@@ -2501,26 +2588,60 @@ paste['define'](
             // position are measured before this pass writes anything.
             drive = function (sequence, progress, policy, scrollOffset) {
                 var desired,
+                    goal,
+                    cursor,
                     prepared;
-                if (passMotionNow) {
+                if (sequence.queued) {
+                    sequence.playDrivenAt = sequence.nowMs;
+                    sequence.playProgress = progress;
+                    sequence.playOffset = scrollOffset;
+                    sequence.playActive = false;
+                }
+                if (passMotionNow || (sequence.queued && $doc.hidden)) {
                     // A reduced-motion page keeps its authored baseline;
                     // the authored initial frame still refines itself.
                     evaluateUpgrade(sequence, policy);
                     return;
                 }
                 if (sequence.phase === 'intro' || sequence.phase === 'intro-wait') {
-                    // A scroll that moved the position ends the phase —
-                    // the user's own location outranks the intro's clock.
-                    if (scrollOffset === sequence.introScrollOffset) {
+                    // Direct playback hands off on scroll. Queued playback
+                    // finishes a running intro; startup waiting still yields.
+                    if (scrollOffset === sequence.introScrollOffset || (sequence.queued && sequence.phase === 'intro')) {
                         return;
                     }
                     endIntro(sequence);
                 }
                 desired = indexOnRange(sequence.scrollFrom, sequence.scrollTo, progress);
+                if (sequence.queued) {
+                    goal = desired;
+                    cursor = sequence.playCursor;
+                    if (cursor === -1 || (cursor === null && backForwardNavigation())) {
+                        cursor = goal;
+                    } else if (cursor === null) {
+                        cursor = sequence.scrollFrom;
+                    } else if (sequence.displayedIndex >= 0 && sequence.displayedIndex !== cursor &&
+                            (goal - sequence.displayedIndex) * (cursor - sequence.displayedIndex) <= 0) {
+                        cursor = sequence.displayedIndex;
+                    } else if (sequence.displayedIndex === cursor && sequence.displayedReady &&
+                            cursor !== goal && (sequence.playAt === null ||
+                                sequence.nowMs - sequence.playAt >= sequence.playInterval)) {
+                        cursor += goal > cursor ? 1 : -1;
+                        sequence.playAt = sequence.nowMs;
+                    }
+                    sequence.playCursor = cursor;
+                    desired = cursor;
+                    // Only an advancing, ready playhead needs another clock tick.
+                    // Pending preparation wakes the existing owner on completion.
+                    sequence.playActive = cursor !== goal && sequence.displayedIndex === cursor &&
+                            sequence.displayedReady;
+                    if (goal !== cursor) {
+                        sequence.direction = goal > cursor ? 1 : -1;
+                    }
+                }
                 // The travel direction the lookahead follows — the sign
                 // of the last move; before any move the declared range's
                 // own direction.
-                if (desired !== sequence.desiredIndex) {
+                if (!sequence.queued && desired !== sequence.desiredIndex) {
                     if (sequence.desiredIndex < 0) {
                         sequence.direction = sequence.scrollTo >= sequence.scrollFrom ? 1 : -1;
                     } else {
@@ -2530,6 +2651,9 @@ paste['define'](
                 sequence.desiredIndex = desired;
                 if (sequence.scrubBufferFrames > 0 && !(sequence.gateOpen && desired === sequence.displayedIndex)) {
                     driveBuffered(sequence, desired, policy);
+                    if (sequence.queued) {
+                        sequence.playActive = desired !== goal && sequence.displayedIndex === desired && sequence.displayedReady;
+                    }
                     return;
                 }
                 if (desired === sequence.displayedIndex) {
@@ -2546,6 +2670,9 @@ paste['define'](
                 if (prepared !== undefined && prepared.ready === true &&
                         repPaintable(sequence, desired, prepared.rep, policy)) {
                     commit(sequence, desired, prepared, policy);
+                }
+                if (sequence.queued) {
+                    sequence.playActive = desired !== goal && sequence.displayedIndex === desired && sequence.displayedReady;
                 }
                 ensureNeighbors(sequence, policy);
             },
@@ -2564,7 +2691,8 @@ paste['define'](
             // the bound; at or past it, it is foreign. A claim that
             // settles as owned lets the next pass sharpen: sharpening
             // waited while it was pending.
-            // Only positive evidence reverts: a readable
+            // Only our still-owned inline declaration can be reverted.
+            // Positive computed evidence reverts: a readable
             // computed source that does not name the claim means a
             // stylesheet rule outranking the inline layer kept the
             // declaration from ever becoming the presentation. The
@@ -2577,6 +2705,24 @@ paste['define'](
                     evidence = sequence.passClaim,
                     style = sequence.element.style;
                 sequence.passClaim = undefined;
+                // A newer inline declaration is another writer's decision,
+                // even if computed style still shows our transitioning image.
+                // Completion work must not reclaim it; a fresh input may retry.
+                if (!ownsBackground(sequence)) {
+                    sequence.claimPending = false;
+                    sequence.painted = false;
+                    sequence.yielded = true;
+                    sequence.playActive = false;
+                    retirePlaybackWake(sequence);
+                    endIntro(sequence);
+                    clearPrepared(sequence);
+                    setDisplayed(sequence, -1, null, false);
+                    prior.rep = null;
+                    sequence.dirty = false;
+                    sequence.passMeasured = null;
+                    sequence.passPolicy = null;
+                    return;
+                }
                 if ((evidence === 'pending' || evidence === 'predecessor') &&
                         !sequence.claimLapsed) {
                     if (sequence.claimPendingSince === null) {
@@ -2609,6 +2755,8 @@ paste['define'](
                 } else {
                     style.removeProperty('background-image');
                 }
+                sequence.ownedBackground = style.getPropertyValue('background-image');
+                sequence.ownedPriority = style.getPropertyPriority('background-image');
                 setDisplayed(sequence, prior.index, prior.rep, prior.ready);
                 prior.rep = null;
                 // The refusal is a fresh decision for the scene.
@@ -2659,6 +2807,7 @@ paste['define'](
                     settledIndex,
                     entry;
                 sequence.passMeasured = null;
+                sequence.nowMs = at;
                 demandRefused = false;
                 sequence.nearView = measured.near !== false;
                 sequence.rangeValid = measured.progress !== null;
@@ -2695,6 +2844,9 @@ paste['define'](
                     prunePrepared(sequence, policy);
                 }
                 if (!sequence.rangeValid || !rendered) {
+                    retirePlaybackWake(sequence);
+                    sequence.playActive = false;
+                    sequence.playAt = null;
                     // No measurable range or no rendered host: intent
                     // withdraws. A running intro ends for good; a
                     // waiting intro stays inert with its deadline timer
@@ -2758,21 +2910,17 @@ paste['define'](
             },
 
             // A ResizeObserver delivery: every sequence a reported
-            // target can move is dirtied; a missing entry or target
-            // skips only itself.
+            // target can move is dirtied; reports for unwatched boxes
+            // schedule no work.
             observerDelivery = function (entries) {
-                var entryIndex = entries ? entries.length : 0,
+                var entryIndex = entries.length,
                     memberIndex,
                     entry,
                     record,
                     members;
-                if (typeof entryIndex !== 'number' || !$isFinite(entryIndex) ||
-                        entryIndex < 0 || entryIndex !== $floor(entryIndex)) {
-                    return;
-                }
                 while (entryIndex--) {
                     entry = entries[entryIndex];
-                    record = entry && entry.target ? observed.get(entry.target) : null;
+                    record = observed.get(entry.target);
                     if (record) {
                         members = record.sequences;
                         memberIndex = members.length;
@@ -3028,6 +3176,8 @@ paste['define'](
             // authored and costs no later declaration its binding.
             bind = function (element, ordinal) {
                 var reference = element.getAttribute(marker),
+                    playback,
+                    playbackFps,
                     declaredProperty,
                     srcAttribute = null,
                     style = null,
@@ -3050,6 +3200,15 @@ paste['define'](
                 // progressiveresolution leaves it.
                 if (nativelySelected(element, true)) {
                     return;
+                }
+                playback = attribute(element, 'sequence-playback');
+                playbackFps = attribute(element, 'sequence-playback-fps');
+                if (playback !== null && playback !== 'direct' && playback !== 'queued') {
+                    throw malformed('sequence-playback must be direct or queued');
+                }
+                if (playbackFps !== null && (!/^[0-9]+$/.test(playbackFps) ||
+                        +playbackFps < 1 || +playbackFps > 120 || playback !== 'queued')) {
+                    throw malformed('sequence-playback-fps requires queued playback and an integer from 1 to 120');
                 }
                 declaredProperty = property(element, malformed);
                 // The host already presents an image: an img sequence
@@ -3096,6 +3255,16 @@ paste['define'](
                     aliasIndex: catalog.aliasIndex,
                     scopeElement: scopeElement,
                     range: range,
+                    queued: playback === 'queued',
+                    playInterval: 1000 / (+playbackFps || 30),
+                    playCursor: null,
+                    playProgress: 0,
+                    playOffset: 0,
+                    playAt: null,
+                    playWakeId: null,
+                    playWakeAt: null,
+                    playDrivenAt: -1,
+                    playActive: false,
                     scrollFrom: from,
                     scrollTo: to,
                     // The lookahead's travel direction — the declared
@@ -3138,6 +3307,7 @@ paste['define'](
                     // The preparation plan, refilled in place.
                     plan: {
                         built: false,
+                        time: -1,
                         desired: -1,
                         direction: 0,
                         phase: null,
@@ -3167,7 +3337,8 @@ paste['define'](
                     // the stamped scratch books.
                     reservation: null,
                     reservationSet: null,
-                    reservationPass: -1,
+                    reservationPolicy: -1,
+                    reservationSources: -1,
                     pricing: {feasible: false, byIndex: [], set: null},
                     asIfPricing: {feasible: false, byIndex: [], set: null},
                     scratch: {
@@ -3175,6 +3346,7 @@ paste['define'](
                         mark: $create(null),
                         count: $create(null),
                         groups: $create(null),
+                        groupList: [],
                         pinned: $create(null),
                         picked: $create(null)
                     },
@@ -3195,6 +3367,10 @@ paste['define'](
                     // since the baseline last stood, and the srcset and
                     // sizes values it last wrote on an img.
                     painted: false,
+                    ownedBackground: null,
+                    ownedPriority: null,
+                    ownedSrc: null,
+                    yielded: false,
                     ownedSrcset: null,
                     ownedSizes: null,
                     // Whether adoption of the authored image waits for
@@ -3229,6 +3405,7 @@ paste['define'](
                     faulted: false,
                     passPolicy: null,
                     passMeasured: null,
+                    measurement: {},
                     settledOps: []
                 };
                 // The authored inline background is the baseline this
@@ -3328,6 +3505,7 @@ paste['define'](
             // scheduling one of its own. A failure in page or platform
             // code is contained, not reported.
             fault = function (sequence) {
+                retirePlaybackWake(sequence);
                 sequence.passPolicy = null;
                 sequence.passMeasured = null;
                 sequence.passClaim = undefined;
@@ -3365,6 +3543,10 @@ paste['define'](
                     styled = false,
                     measured = null,
                     near;
+                if (sequence.yielded) {
+                    sequence.dirty = false;
+                    return;
+                }
                 if (sequence.adoptPending) {
                     sequence.adoptPending = false;
                     style = computedStyle(element);
@@ -3383,13 +3565,13 @@ paste['define'](
                 }
                 if (sequence.dirty || remeasure) {
                     sequence.dirty = false;
-                    measured = scrollrange['measure'](sequence.range);
+                    measured = measureRange(sequence.range, sequence.measurement);
                     sequence.passMeasured = measured;
                 }
-                if (measured !== null || sequence.phase === 'intro') {
+                if (measured !== null || sequence.phase === 'intro' || (sequence.playActive && sequence.playWakeId === null)) {
                     near = measured !== null ? measured.near !== false : sequence.nearView;
                     if (near || remeasure || sequence.policyDirty || !sequence.policy.read ||
-                            sequence.phase === 'intro') {
+                            sequence.phase === 'intro' || sequence.playActive) {
                         if (!styled) {
                             style = computedStyle(element);
                         }
@@ -3404,8 +3586,11 @@ paste['define'](
             // baseline comes back — writes only; adoption and the
             // static pass follow in the next frame's read phase.
             standDown = function (sequence) {
+                retirePlaybackWake(sequence);
                 sequence.passPolicy = null;
                 sequence.passMeasured = null;
+                sequence.playActive = false;
+                sequence.playCursor = null;
                 endIntro(sequence);
                 restoreBaseline(sequence);
                 sequence.desiredIndex = -1;
@@ -3435,7 +3620,6 @@ paste['define'](
             }
             passRead = true;
             frameRequested = false;
-            passNumber += 1;
             passMotionNow = reducedMotion();
             passMotionChanged = passMotionNow !== motionSeen;
             motionSeen = passMotionNow;
@@ -3508,7 +3692,22 @@ paste['define'](
                         fault(sequence);
                     }
                 }
+                if (sequence.queued && sequence.phase === 'scroll' && sequence.playActive && sequence.playWakeId === null &&
+                        sequence.passPolicy !== null && sequence.playDrivenAt !== at) {
+                    sequence.nowMs = at;
+                    try {
+                        drive(sequence, sequence.playProgress, sequence.passPolicy, sequence.playOffset);
+                    } catch (playError) {
+                        sequence.playActive = false;
+                        fault(sequence);
+                    }
+                }
                 sequence.passPolicy = null;
+                if (sequence.playActive && !sequence.faulted && !sequence.yielded) {
+                    armPlaybackWake(sequence, at);
+                } else {
+                    retirePlaybackWake(sequence);
+                }
                 if (sequence.faulted) {
                     try {
                         endIntro(sequence);
@@ -3572,6 +3771,9 @@ paste['define'](
                         src;
                     if ($doc.hidden) {
                         while (index--) {
+                            retirePlaybackWake(sequences[index]);
+                            sequences[index].playActive = false;
+                            sequences[index].playAt = null;
                             endIntroNow(sequences[index]);
                         }
                     } else {

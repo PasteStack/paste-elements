@@ -1,0 +1,9 @@
+@mixin paste-ui-apply($error-color: #dc3545) {
+  .paste-ui-apply-label-hidden {
+    opacity: 0;
+  }
+
+  .paste-ui-apply-error {
+    color: $error-color;
+  }
+}

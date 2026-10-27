@@ -28,6 +28,7 @@ function fixture(options = {}) {
             clientWidth: width,
             // Layout width: transforms never reach it.
             get offsetWidth() { return this.clientWidth; },
+            get offsetHeight() { return height; },
             getAttribute: key => attributes.has(key) ? attributes.get(key) : null,
             hasAttribute: key => attributes.has(key),
             setAttribute: (key, value) => attributes.set(key, String(value)),
@@ -49,9 +50,9 @@ function fixture(options = {}) {
                 const step = runningLayout ? 0 : this.clientWidth + gap;
                 const left = options.wrapped ? 0 : index * step;
                 const top = options.wrapped && !runningLayout ? index * (height + gap) : 0;
-                const k = options.scale || 1;
-                return {width: this.clientWidth * k, height: height * k, left: left * k,
-                    right: (left + this.clientWidth) * k, top: top * k};
+                const k = options.scale || 1, y = options.scaleY || k;
+                return {width: this.clientWidth * k, height: height * y, left: left * k,
+                    right: (left + this.clientWidth) * k, top: top * y};
             },
             addEventListener(type, fn) { listeners.set(this.className + ':' + type, fn); },
             removeEventListener(type, fn) {
@@ -373,8 +374,7 @@ test('a burst of resize notifications coalesces into one remeasure', () => {
 
 test('list mutations re-measure declaratively — and only the list is watched', () => {
     const f = fixture();
-    // The observer's whole world is this list's own children: no
-    // document subtree, no attribute command channel.
+    // Observe this list's content and interactivity, never the document.
     assert.equal(f.mutations.length, 1);
     assert.equal(f.mutations[0].watches.length, 1,
         'the module observes more than one surface');
@@ -384,8 +384,10 @@ test('list mutations re-measure declaratively — and only the list is watched',
     // prototype is not this realm's, so compare the flags, not the object.
     assert.equal(f.mutations[0].watches[0].opts.childList, true,
         'the watch does not cover list children');
-    assert.equal(Object.keys(f.mutations[0].watches[0].opts).length, 1,
-        'the watch reaches beyond direct list children');
+    assert.equal(f.mutations[0].watches[0].opts.subtree, true);
+    assert.equal(f.mutations[0].watches[0].opts.attributes, true);
+    assert.ok(!f.mutations[0].watches[0].opts.attributeFilter.includes('style'),
+        'geometry writes feed back into their own observer');
     // Appended content joins the measurement set without any imperative call.
     const extra = f.element('paste-ui-marquee-item', 200);
     extra.parentElement = f.list;
@@ -1005,11 +1007,11 @@ test('the running translation mirrors under a right-to-left direction', () => {
     assert.ok(frames, 'the keyframes are missing');
     const transforms = frames[1].match(/transform:[^;]*;/g);
     assert.equal(transforms.length, 2);
-    transforms.forEach(t => assert.ok(/calc\(var\(--paste-marquee-inline-sign\) \*/.test(t),
+    transforms.forEach(t => assert.ok(/calc\(var\(--paste-marquee-inline-sign, 1\) \*/.test(t),
         'a keyframe translates physically, ignoring the inline direction: ' + t));
-    assert.ok(/\.paste-ui-marquee:dir\(rtl\)\s*\{\s*--paste-marquee-inline-sign: -1;/.test(scss),
+    assert.ok(/&:dir\(rtl\)\s*\{\s*--paste-marquee-inline-sign: -1;/.test(scss),
         'no right-to-left sign under :dir(rtl)');
-    assert.ok(/\[dir="rtl"\] \.paste-ui-marquee,[\s\S]*?--paste-marquee-inline-sign: -1;/.test(scss),
+    assert.ok(/\[dir="rtl"\]\s*\{\s*--paste-marquee-inline-sign: -1;/.test(scss),
         'no dir-attribute fallback for engines without :dir()');
     assert.ok(/--paste-marquee-inline-sign: 1;/.test(scss), 'no left-to-right default sign');
 });
@@ -1172,4 +1174,47 @@ test('geometry under a scaled ancestor is written in layout pixels', () => {
     assert.equal(f.list.style.getPropertyValue('--paste-marquee-row-height'), '80px');
     assert.equal(f.list.style.getPropertyValue('--paste-marquee-distance'), (6 * 216) + 'px',
         'the pitch was written at its rendered scale');
+});
+
+test('reduced motion rejects animation before reading any item geometry', () => {
+    let reads = 0;
+    const f = fixture({reduced: true, beforeDefine({root, list}) {
+        [root, list, ...list.children].forEach(element => {
+            const rect = element.getBoundingClientRect;
+            element.getBoundingClientRect = function () { reads += 1; return rect.call(this); };
+        });
+    }});
+    assert.equal(reads, 0);
+    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'static');
+    f.media.matches = false;
+    f.listeners.get('media:change')();
+    f.flushFrames();
+    assert.ok(reads > 0, 'enabling motion did not measure the list');
+    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'running');
+});
+
+
+test('adding an interactive descendant without resizing stops marquee motion', () => {
+    const f = fixture(), item = f.list.children[0];
+    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'running');
+    item.querySelector = () => ({tagName: 'BUTTON'});
+    f.mutations[0].callback([{type: 'childList', target: item, addedNodes: [{}], removedNodes: []}]);
+    f.flushFrames();
+    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'static');
+    assert.equal(f.toggle.hidden, true);
+});
+
+test('an item becoming focusable without a box change stops motion', () => {
+    const f = fixture(), item = f.list.children[0], matches = item.matches;
+    item.matches = selector => selector.includes('[tabindex]') || matches(selector);
+    f.mutations[0].callback([{type: 'attributes', target: item, attributeName: 'tabindex'}]);
+    f.flushFrames();
+    assert.equal(f.root.getAttribute('data-paste-marquee-state'), 'static');
+});
+
+test('different horizontal and vertical scales retain the correct layout row height', () => {
+    const f = fixture({scale: 0.5, scaleY: 2});
+    assert.equal(f.list.style.getPropertyValue('--paste-marquee-item-size'), '200px');
+    assert.equal(f.list.style.getPropertyValue('--paste-marquee-row-height'), '80px');
+    assert.equal(f.list.style.getPropertyValue('--paste-marquee-distance'), '1296px');
 });

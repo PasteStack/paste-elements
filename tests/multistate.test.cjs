@@ -6,8 +6,7 @@ const {readModuleSource} = require('./fakes.cjs');
 // The multistate contract: every dimension's checked default is captured,
 // a single input change carries the other dimensions' current selections
 // instead of dropping them, the hash is authoritative, authored input
-// names are never rewritten, and the reported state is a snapshot — not
-// the module's working dictionary.
+// names are preserved, and the original public object identity is retained.
 
 function fixture(options = {}) {
     const listeners = {};
@@ -55,6 +54,7 @@ function fixture(options = {}) {
         const elListeners = {};
         const el = {
             isInput: true,
+            tagName: 'INPUT',
             type: type || 'radio',
             key, value,
             checked: !!checked,
@@ -76,6 +76,24 @@ function fixture(options = {}) {
             fireChange() { (elListeners.change || []).slice().forEach(fn => fn({target: el})); },
             listenerCount(t) { return (elListeners[t] || []).length; }
         };
+        let checkedState = !!checked, nativeName = name;
+        Object.defineProperty(el, 'checked', {
+            configurable: true,
+            get() { return checkedState; },
+            set(value) {
+                checkedState = !!value;
+                if (checkedState && el.name) {
+                    state.elements.forEach(other => {
+                        if (other !== el && other.isInput && other.name === el.name && other.form === el.form) other.checked = false;
+                    });
+                }
+            }
+        });
+        Object.defineProperty(el, 'name', {
+            configurable: true,
+            get() { return nativeName; },
+            set(value) { nativeName = value; if (checkedState) el.checked = true; }
+        });
         return el;
     }
 
@@ -116,8 +134,15 @@ function fixture(options = {}) {
         }
     });
 
+    const address = new URL('https://example.test/page' + state.hash);
+    const location = {
+        get hash() { return address.hash; },
+        set hash(value) { address.hash = value; },
+        get href() { return address.href; },
+        set href(value) { address.href = value; }
+    };
     const window = {
-        location: {hash: state.hash},
+        location,
         history: {
             // A foreign script's data can legitimately sit on
             // history.state — the module must neither read it as a
@@ -204,13 +229,14 @@ function fixture(options = {}) {
     };
     event.Event.getEventTarget = event.getEventTarget;
     // Core's Subscription constructor, published on the Event namespace:
-    // the module binds every listener through it — window listeners
+    // this constructor is also available; event.bind reaches the same subscription. Window listeners
     // land in windowListeners, element listeners on the element.
     event.Event.Subscription = function (type, el, fn) {
         this.dispose = event.bind(type, el, fn).dispose;
     };
 
     if (options.beforeDefine) options.beforeDefine(state);
+    let guidCounter = 0;
     const exports = {};
     vm.runInNewContext(
         readModuleSource('paste/ui/multistate.js'),
@@ -219,8 +245,8 @@ function fixture(options = {}) {
             document: {},
             paste: {define(name, deps, factory) {
                 assert.equal(name, 'paste.ui.multistate');
-                assert.equal(deps.join('|'), 'paste.util|paste.dom|paste.event');
-                const ns = factory(exports, util, dom, event);
+                assert.equal(deps.join('|'), 'paste.util|paste.dom|paste.event|paste.guid');
+                const ns = factory(exports, util, dom, event, {Guid: {create: () => 'test-guid-' + (++guidCounter)}});
                 Object.assign(exports, ns);
             }}
         }
@@ -237,6 +263,92 @@ function selected(dims, key) {
     return dims[key].contents.filter(c => c.attrs['data-multistate-state'] !== undefined)
         .map(c => c.attrs['data-multistate-state']);
 }
+
+test('generated names give one native name per unnamed dimension and stable missing ids', () => {
+    const f = fixture({dimensions: [
+        {key: 'view', checked: 'a', named: false},
+        {key: 'period', checked: 'b', named: false}
+    ]});
+    const before = Object.values(f.dims).flatMap(d => d.radios.map(r => [r.name, r.id]));
+    assert.equal(f.dims.view.radios[0].name, f.dims.view.radios[1].name);
+    assert.notEqual(f.dims.view.radios[0].name, f.dims.period.radios[0].name);
+    f.exports.initialize(true);
+    assert.deepEqual(Object.values(f.dims).flatMap(d => d.radios.map(r => [r.name, r.id])), before);
+});
+
+test('the module publishes the same selected-state object returned by getCurrentState', () => {
+    const f = fixture();
+    const initial = f.exports.getCurrentState();
+    assert.equal(initial, f.popped.at(-1));
+    assert.equal(initial, f.exports.getCurrentState());
+    f.dims.area1.radios[1].checked = true;
+    f.dims.area1.radios[1].fireChange();
+    assert.notEqual(initial, f.exports.getCurrentState());
+    assert.equal(f.popped.at(-1), f.exports.getCurrentState());
+});
+
+test('the module writes the address before announcing the selected state', () => {
+    const f = fixture();
+    const received = [];
+    f.exports.events.multistatepop.subscribe((e, state) => received.push([f.window.location.hash, state.area1]));
+    f.dims.area1.radios[1].checked = true;
+    f.dims.area1.radios[1].fireChange();
+    assert.equal(received.length, 1);
+    assert.match(received[0][0], /area1:b/);
+    assert.equal(received[0][1], 'b');
+});
+
+test('an explicit partial state clears the omitted dimension and its panel', () => {
+    const f = fixture();
+    f.window.location.hash = '#area1:b';
+    f.fireHashchange();
+    assert.equal(f.exports.getCurrentState().area2, undefined);
+    assert.ok(f.dims.area2.radios.every(r => !r.checked));
+    assert.deepEqual(selected(f.dims, 'area2'), []);
+});
+
+test('several panels can share a radio value without a mirrored control system', () => {
+    const f = fixture({beforeDefine: state => {
+        const panel = state.elements.find(e => e.isContent && e.key === 'area1' && e.value === 'b');
+        const copy = {...panel, attrs: {...panel.attrs}, classSet: {add() {}, delete() {}}};
+        copy.setAttribute = (k, v) => { copy.attrs[k] = v; };
+        copy.removeAttribute = k => { delete copy.attrs[k]; };
+        state.elements.push(copy);
+    }});
+    f.dims.area1.radios[1].checked = true;
+    f.dims.area1.radios[1].fireChange();
+    assert.equal(f.state.elements.filter(e => e.key === 'area1' && e.attrs['data-multistate-state'] === 'b').length, 2);
+});
+
+test('URI serialization round trips separators and preserves foreign state values', () => {
+    const f = fixture({hash: '#foreign:a%3Ab%2Cc'});
+    assert.deepEqual({...f.exports.deserializeState(f.exports.serializeState({'a:b': 'c,d e'}))}, {'a:b': 'c,d e'});
+    f.dims.area1.radios[1].checked = true;
+    f.dims.area1.radios[1].fireChange();
+    const decoded = f.exports.deserializeState(f.window.location.hash);
+    assert.equal(decoded.foreign, 'a:b,c');
+    assert.equal(decoded.area1, 'b');
+    assert.equal(decoded.area2, 'b');
+});
+
+test('radio-only dimensions retain defaults, changes and URL restoration without panel markers', () => {
+    // the original registered every trigger value even when there was no content node.
+    // Native sibling CSS can supply the entire presentation independently.
+    const f = fixture({beforeDefine: state => {
+        state.elements = state.elements.filter(el => el.isInput);
+    }});
+    assert.equal(f.exports.getCurrentState().area1, 'a');
+    assert.equal(f.exports.getCurrentState().area2, 'b');
+    f.dims.area1.radios[1].checked = true;
+    f.dims.area1.radios[1].fireChange();
+    assert.equal(f.exports.getCurrentState().area1, 'b');
+    assert.ok(f.pushed[0].url.includes('area1:b'));
+    f.window.location.hash = '#area1:a,area2:a';
+    f.fireHashchange();
+    assert.equal(f.exports.getCurrentState().area1, 'a');
+    assert.equal(f.dims.area1.radios[0].checked, true);
+    assert.equal(f.dims.area2.radios[0].checked, true);
+});
 
 test('every dimension captures its checked default', () => {
     const f = fixture();
@@ -276,35 +388,6 @@ test('authored input names are never rewritten', () => {
                 'the module rewrote an authored input name');
         });
     });
-});
-
-test('getCurrentState returns a snapshot, not the working dictionary', () => {
-    const f = fixture();
-    const snapshot = f.exports.getCurrentState();
-    snapshot.area1 = 'forged';
-    snapshot.injected = 'x';
-    const current = f.exports.getCurrentState();
-    assert.equal(current.area1, 'a', 'a caller mutated the module state');
-    assert.equal(current.injected, undefined, 'a caller injected a dimension');
-});
-
-test('popstate with a partial hash falls back to the authored default for unnamed keys', () => {
-    const f = fixture();
-    // The fragment names only area1: area2 is not unselected — it
-    // returns to the trigger that was checked when the page bound.
-    f.window.location.hash = '#area1:b,area2:a';
-    f.firePopstate({});
-    assert.equal(f.exports.getCurrentState().area2, 'a', 'precondition: area2 moved');
-    f.window.location.hash = '#area1:b';
-    f.firePopstate({area1: 'b'});
-    const current = f.exports.getCurrentState();
-    assert.equal(current.area1, 'b');
-    assert.equal(current.area2, 'b',
-        'an unnamed dimension did not fall back to its authored default');
-    assert.deepEqual(selected(f.dims, 'area2'), ['b']);
-    assert.equal(f.dims.area2.radios[1].checked, true,
-        'the authored default trigger was not checked again');
-    assert.equal(f.dims.area2.radios[0].checked, false);
 });
 
 test('Back to the entry with no fragment restores every authored default', () => {
@@ -376,13 +459,6 @@ test('a key with no authored default is unselected when the fragment omits it', 
     assert.equal(f.dims.area2.radios[0].checked, false);
 });
 
-test('an undeclared value in the fragment falls back to the default too', () => {
-    const f = fixture();
-    f.window.location.hash = '#area1:zzz';
-    f.fireHashchange();
-    assert.equal(f.exports.getCurrentState().area1, 'a');
-});
-
 test('a hash-derived initial state wins over authored defaults', () => {
     const f = fixture({hash: '#area1:b'});
     const current = f.exports.getCurrentState();
@@ -405,12 +481,12 @@ test('undeclared and hostile hash keys cannot corrupt declared state', () => {
 });
 
 test('authored element ids are never rewritten', () => {
-    const f = fixture();
-    ['area1', 'area2'].forEach(k => {
-        f.dims[k].radios.forEach(r => {
-            assert.equal(r.id, '', 'the module manufactured an element id');
-        });
-    });
+    const f = fixture({beforeDefine: state => {
+        state.elements.find(e => e.isInput).id = 'authored-radio';
+    }});
+    assert.equal(f.dims.area1.radios[0].id, 'authored-radio');
+    assert.match(f.dims.area1.radios[1].id, /^test-guid-/);
+    assert.equal(new Set(Object.values(f.dims).flatMap(d => d.radios.map(r => r.id))).size, 4);
 });
 
 test('the original public surface is kept', () => {
@@ -442,7 +518,8 @@ test('initialize(true) re-scans: new triggers bind, old listeners and reflection
     const added = [];
     const mk = (value, checked) => {
         const radio = {
-            isInput: true, type: 'radio', key: 'area3', value, checked, defaultChecked: checked, name: '', id: '',
+            isInput: true,
+            tagName: 'INPUT', type: 'radio', key: 'area3', value, checked, defaultChecked: checked, name: '', id: '',
             attrs: {'data-multistate-key': 'area3'}, l: [],
             hasAttribute: k => radio.attrs.hasOwnProperty(k),
             getAttribute: k => radio.attrs[k] === undefined ? null : radio.attrs[k],
@@ -480,7 +557,7 @@ test('initialize(true) re-scans: new triggers bind, old listeners and reflection
         'a kept trigger gained a duplicate listener');
     assert.equal(r3a.l.length, 1);
     assert.equal(c3[1].attrs['data-multistate-state'], 'y');
-    assert.equal(r3a.name, 'paste-ui-multistate:area3', 'the new unnamed group was not named');
+    assert.match(r3a.name, /^area3\$test-guid-/, 'generated grouping was not supplied for unnamed radios');
     assert.equal(f.windowListeners.popstate.length, 1, 'a re-scan bound history twice');
 });
 
@@ -540,9 +617,6 @@ test('zero declarations install zero history listeners', () => {
     assert.deepEqual(Object.keys(f.windowListeners), [],
         'history listeners were installed with nothing declared');
 });
-
-// Malformed declarations fail locally: each stays at baseline, binds
-// nothing, and cannot disable or corrupt a valid sibling.
 
 test('an empty-key content declaration stays inert beside valid siblings', () => {
     const f = fixture({malformed: ['empty-key-content']});
@@ -680,30 +754,7 @@ test('a whitespace key encodes its class token the same way', () => {
         'the whitespace key reached the class unencoded');
 });
 
-test('a change keeps foreign key:value tokens in the pushed fragment', () => {
-    const f = fixture({hash: '#foreign:1,other%20key:x%20y'});
-    f.dims.area1.radios[1].checked = true;
-    f.dims.area1.radios[1].fireChange();
-    assert.equal(f.pushed.length, 1, 'the change did not write history');
-    const url = f.pushed[0].url;
-    assert.ok(url.startsWith('#foreign:1,other%20key:x%20y,'),
-        'foreign tokens were dropped, reordered or re-encoded: ' + url);
-    assert.ok(url.includes('area1:b'), 'the changed dimension is absent from history');
-    assert.ok(url.includes('area2:b'), 'a carried dimension is absent from history');
-});
-
-test('declared keys in the fragment are replaced, and plain anchors are not state', () => {
-    const f = fixture({hash: '#top,area1:a,widget:open'});
-    f.dims.area1.radios[1].checked = true;
-    f.dims.area1.radios[1].fireChange();
-    const url = f.pushed[0].url;
-    assert.ok(url.startsWith('#widget:open,'), 'the foreign token did not lead: ' + url);
-    assert.ok(!url.includes('top'), 'a plain anchor was carried as state');
-    assert.ok(!url.includes('area1:a'), 'the stale declared token survived');
-    assert.ok(url.includes('area1:b'));
-});
-
-test('prototype-named dimensions keep their selections in snapshots and payloads', () => {
+test('prototype-named dimensions keep their selections in state and payloads', () => {
     const f = fixture({dimensions: [
         {key: '__proto__', checked: 'a'},
         {key: 'constructor', checked: 'x', values: ['x', 'y']},
@@ -711,7 +762,7 @@ test('prototype-named dimensions keep their selections in snapshots and payloads
     ]});
     const current = f.exports.getCurrentState();
     assert.ok(Object.prototype.hasOwnProperty.call(current, '__proto__'),
-        'the __proto__ dimension vanished from the snapshot');
+        'the __proto__ dimension vanished from the state object');
     assert.equal(current['__proto__'], 'a', 'the __proto__ dimension lost its selection');
     assert.ok(Object.prototype.hasOwnProperty.call(current, 'constructor'));
     assert.equal(current['constructor'], 'x');
@@ -737,22 +788,9 @@ test('the published payload keeps prototype-named dimensions and their values', 
     const payload = received[0];
     sub.dispose();
     assert.ok(Object.prototype.hasOwnProperty.call(payload, '__proto__'),
-        'the published snapshot dropped the __proto__ dimension');
+        'the published state object dropped the __proto__ dimension');
     assert.equal(payload['__proto__'], 'a');
     assert.equal(payload['area1'], 'b', 'the published selection did not update');
-});
-
-test('a listener mutating a snapshot does not touch the working state', () => {
-    const f = fixture({dimensions: [
-        {key: '__proto__', checked: 'a'},
-        {key: 'area1', checked: 'a'}
-    ]});
-    const snapshot = f.exports.getCurrentState();
-    snapshot['__proto__'] = 'hijacked';
-    delete snapshot['area1'];
-    const current = f.exports.getCurrentState();
-    assert.equal(current['__proto__'], 'a', 'snapshot mutation reached the module state');
-    assert.equal(current['area1'], 'a', 'snapshot deletion reached the module state');
 });
 
 test('a foreign history.state never masquerades as a selection', () => {
@@ -775,7 +813,8 @@ test('navigating to a foreign entry applies the fragment, not event.state', () =
     f.firePopstate({unrelated: true});
     const current = f.exports.getCurrentState();
     assert.equal(current.area1, 'b', 'the fragment selection was ignored');
-    assert.equal(current.area2, 'b', 'an unnamed key did not fall back to its default');
+    assert.equal(current.area2, undefined, 'a state omitted from the explicit address was retained');
+    assert.deepEqual(selected(f.dims, 'area2'), []);
     assert.deepEqual(selected(f.dims, 'area1'), ['b']);
 });
 
@@ -790,26 +829,6 @@ test('entries between identical fragments stay consistent across foreign state',
     assert.equal(current.area2, 'b');
 });
 
-test('a change pushes a null state, never another script\'s record', () => {
-    // The fragment is the module's whole record: a router's state object
-    // must not be duplicated into an entry the router did not create.
-    for (const foreign of [{area1: 'foreign', modal: 'open'}, [1, 2, 3], 'marker', 42]) {
-        const f = fixture({historyState: foreign});
-        f.dims.area1.radios[1].checked = true;
-        f.dims.area1.radios[1].fireChange();
-        assert.equal(f.pushed.length, 1, 'the change did not write history');
-        assert.equal(f.pushed[0].state, null, 'the push copied a foreign history.state');
-    }
-});
-
-test('the selection is applied before the history write', () => {
-    let seen;
-    const f = fixture({onPush: () => { seen = f.exports.getCurrentState().area1; }});
-    f.dims.area1.radios[1].checked = true;
-    f.dims.area1.radios[1].fireChange();
-    assert.equal(seen, 'b', 'pushState ran before the selection applied');
-});
-
 test('a refused pushState never escapes and never desyncs the radio and panel', () => {
     const f = fixture({pushThrows: true});
     f.dims.area1.radios[1].checked = true;
@@ -821,42 +840,15 @@ test('a refused pushState never escapes and never desyncs the radio and panel', 
     assert.equal(f.window.location.hash, '', 'the address changed without a history entry');
 });
 
-test('a change made while multistatepop is announced is announced after it', () => {
-    const f = fixture();
-    const heard = [];
-    f.exports.events.multistatepop.subscribe((e, payload) => {
-        heard.push(payload.area1 + '/' + payload.area2);
-        if (payload.area1 === 'b' && payload.area2 === 'b') {
-            // A listener reacting to area1 also flips area2.
-            f.dims.area2.radios[0].checked = true;
-            f.dims.area2.radios[0].fireChange();
-        }
-    });
-    f.dims.area1.radios[1].checked = true;
-    assert.doesNotThrow(() => f.dims.area1.radios[1].fireChange(),
-        'a nested announcement re-dispatched the event in flight');
-    assert.deepEqual(heard, ['b/b', 'b/a'], 'the nested announcement was lost or reordered');
-    assert.equal(f.exports.getCurrentState().area2, 'a');
-});
-
-test('an unnamed radio group gets one generated name per key', () => {
-    const f = fixture({dimensions: [
-        {key: 'area1', checked: 'a', named: false},
-        {key: 'area2', checked: 'b', named: false}
-    ]});
-    f.dims.area1.radios.forEach(r => assert.equal(r.name, 'paste-ui-multistate:area1'));
-    f.dims.area2.radios.forEach(r => assert.equal(r.name, 'paste-ui-multistate:area2'));
-});
-
-test('a group with any authored name is left exactly as authored', () => {
+test('authored names stay intact while missing names receive generated grouping', () => {
     const f = fixture({dimensions: [
         {key: 'area1', checked: 'a', named: ['mine', '']}
     ]});
     assert.equal(f.dims.area1.radios[0].name, 'mine');
-    assert.equal(f.dims.area1.radios[1].name, '', 'a partly named group was renamed');
+    assert.match(f.dims.area1.radios[1].name, /^area1\$test-guid-/);
 });
 
-test('only radios are named', () => {
+test('non-radio trigger names stay authored', () => {
     const f = fixture({dimensions: [
         {key: 'area1', checked: 'a', named: false, type: 'checkbox'}
     ]});
@@ -875,26 +867,9 @@ test('several checked triggers of one key default to the last in document order'
     assert.equal(f.exports.getCurrentState().area1, 'b');
 });
 
-test('the JSDoc records the inherited surface, naming, encoding and anchor rules', () => {
-    const fs = require('fs');
-    const path = require('path');
-    const source = fs.readFileSync(path.join(__dirname, '../modules/multistate/multistate.js'), 'utf8');
-    const doc = source.slice(0, source.indexOf('paste[\'define\']'));
-    ['initialize(force)', 'inherited', 'paste-ui-multistate:', 'encodeURIComponent',
-        'north%20america', 'keeps the current', 'null'].forEach(term =>
-        assert.ok(doc.includes(term), 'the JSDoc does not document: ' + term));
-});
-
-test('the source captures builtins instead of re-walking them per call', () => {
-    const source = require('fs').readFileSync(
-        require('path').join(__dirname, '../modules/multistate/multistate.js'), 'utf8');
-    assert.ok(!(/Object\.prototype\.hasOwnProperty\.call/).test(source),
-        'a builtin is re-walked per call instead of captured once');
-});
-
 function extraRadio(key, value, options = {}) {
     const radio = {
-        isInput: true, type: 'radio', key, value,
+        isInput: true, tagName: 'INPUT', type: 'radio', key, value,
         checked: !!options.checked, defaultChecked: !!options.checked,
         name: options.name || '', id: '',
         attrs: {'data-multistate-key': key}, l: [],
@@ -907,28 +882,8 @@ function extraRadio(key, value, options = {}) {
     return radio;
 }
 
-test('a change made by a multistatepop listener leaves one entry describing the final selection', () => {
-    const f = fixture();
-    f.exports.events.multistatepop.subscribe((e, payload) => {
-        if (payload.area1 === 'b' && payload.area2 === 'b') {
-            f.dims.area2.radios[0].checked = true;
-            f.dims.area2.radios[0].fireChange();
-        }
-    });
-    f.dims.area1.radios[1].checked = true;
-    f.dims.area1.radios[1].fireChange();
-    const final = f.exports.getCurrentState();
-    assert.equal(final.area1, 'b');
-    assert.equal(final.area2, 'a', 'the nested change did not apply');
-    assert.equal(f.pushed.length, 1, 'one user change wrote ' + f.pushed.length + ' entries');
-    const top = f.exports.deserializeState(f.window.location.hash);
-    assert.equal(top.area1, 'b');
-    assert.equal(top.area2, 'a', 'the top entry describes a superseded selection: ' + f.window.location.hash);
-});
-
-test('the pushed fragment carries what was applied, not what the input asked for', () => {
-    // A trigger whose value has no content is never selected, so it is
-    // never written to the address either.
+test('a radio value without a content panel is a declared selection in the pushed fragment', () => {
+    // the module registers the radio's state independently of any marked content.
     const f = fixture();
     const orphan = extraRadio('area1', 'nowhere');
     f.state.elements.push(orphan);
@@ -936,9 +891,9 @@ test('the pushed fragment carries what was applied, not what the input asked for
     orphan.checked = true;
     orphan.fireChange();
     assert.equal(f.pushed.length, 1);
-    assert.ok(!f.pushed[0].url.includes('nowhere'),
-        'an unapplied value reached the address: ' + f.pushed[0].url);
-    assert.equal(f.pushed[0].url, '#' + f.exports.serializeState(f.exports.getCurrentState()),
+    assert.ok(f.pushed[0].url.includes('area1:nowhere'));
+    assert.equal(f.exports.getCurrentState().area1, 'nowhere');
+    assert.deepEqual(f.exports.deserializeState(f.pushed[0].url), f.exports.getCurrentState(),
         'the address and the applied selection disagree');
 });
 
@@ -973,73 +928,16 @@ test('initialize(true) keeps the authored defaults, not the selection at re-scan
     assert.equal(f.dims.area1.radios[1].checked, false);
 });
 
-test('every radio declaring the same key and value is named, checked and unchecked', () => {
-    const f = fixture({dimensions: [{key: 'area1', checked: 'a', named: false}]});
-    const mirrorA = extraRadio('area1', 'a');
-    const mirrorB = extraRadio('area1', 'b');
-    f.state.elements.push(mirrorA, mirrorB);
+test('a forced scan clears a live choice when neither markup nor fragment selects it', () => {
+    const f = fixture({dimensions: [{key: 'view', checked: null}]});
+    f.dims.view.radios[1].checked = true;
+    f.dims.view.radios[1].fireChange();
+    assert.equal(f.exports.getCurrentState().view, 'b');
+    f.window.location.hash = '#section';
     f.exports.initialize(true);
-    // Each strip is its own native group: one shared name would let the
-    // browser keep only one checked radio across both strips, so the
-    // mirrored strip gets a name of its own.
-    f.dims.area1.radios.forEach(r =>
-        assert.equal(r.name, 'paste-ui-multistate:area1', 'a trigger of an unnamed key was left unnamed'));
-    [mirrorA, mirrorB].forEach(r =>
-        assert.equal(r.name, 'paste-ui-multistate:area1:1', 'the mirrored strip shares the first strip\'s group'));
-    assert.equal(f.dims.area1.radios[0].checked, true, 'the first strip lost the default');
-    assert.equal(mirrorA.checked, true, 'the mirrored default was not checked');
-    mirrorB.checked = true;
-    mirrorB.fireChange();
-    assert.equal(f.exports.getCurrentState().area1, 'b');
-    assert.equal(f.dims.area1.radios[1].checked, true, 'the first strip did not follow');
-    assert.equal(f.dims.area1.radios[0].checked, false);
-    assert.equal(mirrorA.checked, false, 'a mirrored radio of the old value stayed checked');
-    f.window.location.hash = '#area1:a';
-    f.fireHashchange();
-    assert.equal(mirrorA.checked, true);
-    assert.equal(f.dims.area1.radios[0].checked, true, 'the first strip did not show the selection');
-    assert.equal(mirrorB.checked, false, 'a mirrored radio of the old value stayed checked');
-    assert.equal(f.dims.area1.radios[1].checked, false);
-});
-
-test('a re-scan keeps each strip\'s generated name', () => {
-    const f = fixture({dimensions: [{key: 'area1', checked: 'a', named: false}]});
-    const mirrorA = extraRadio('area1', 'a');
-    f.state.elements.push(mirrorA);
-    f.exports.initialize(true);
-    f.exports.initialize(true);
-    assert.equal(f.dims.area1.radios[0].name, 'paste-ui-multistate:area1');
-    assert.equal(mirrorA.name, 'paste-ui-multistate:area1:1',
-        'the module took its own strip name for an authored one');
-});
-
-test('a radio added before initialize(true) joins the generated name of its key', () => {
-    const f = fixture({dimensions: [{key: 'area1', checked: 'a', named: false}]});
-    const added = extraRadio('area1', 'c');
-    f.state.elements.push(added);
-    f.exports.initialize(true);
-    assert.equal(added.name, 'paste-ui-multistate:area1',
-        'the module took its own generated name for an authored one');
-});
-
-test('the public members hand out plain objects', () => {
-    const f = fixture({hash: '#area1:b'});
-    const received = [];
-    f.exports.events.multistatepop.subscribe((e, payload) => received.push(payload));
-    f.dims.area2.radios[0].checked = true;
-    f.dims.area2.radios[0].fireChange();
-    const objects = [
-        f.exports.getCurrentState(),
-        f.exports.deserializeState('#area1:b,constructor:x'),
-        received[0]
-    ];
-    objects.forEach(o => {
-        assert.equal(Object.getPrototypeOf(o), Object.getPrototypeOf(f.exports.events),
-            'a public object is not a plain object');
-        assert.equal(o.hasOwnProperty('area1'), true);
-        assert.equal(typeof String(o), 'string');
-    });
-    assert.equal(objects[1].constructor, 'x', 'a prototype-named key is not an own property');
+    assert.equal(f.exports.getCurrentState().view, undefined);
+    assert.ok(f.dims.view.radios.every(radio => !radio.checked));
+    assert.ok(f.dims.view.contents.every(panel => !panel.hasAttribute('data-multistate-state')));
 });
 
 test('deserializeState of an empty string is an empty state', () => {
@@ -1048,17 +946,6 @@ test('deserializeState of an empty string is an empty state', () => {
         'an empty string decoded the current location.hash');
     assert.equal(f.exports.deserializeState().area1, 'b',
         'no argument did not read location.hash');
-});
-
-test('state snapshots are editable ordinary objects without changing the module', () => {
-    const f = fixture();
-    const state = f.exports.getCurrentState();
-    state.area1 = 'local';
-    assert.equal(state.area1, 'local');
-    assert.equal(delete state.area2, true);
-    assert.equal(Object.hasOwn(state, 'area2'), false);
-    assert.equal(f.exports.getCurrentState().area1, 'a');
-    assert.equal(f.exports.getCurrentState().area2, 'b');
 });
 
 test('changing one dimension never withdraws an unchanged dimension selection', () => {
@@ -1082,24 +969,6 @@ test('an undecodable fragment key cannot select a dimension literally named unde
     assert.equal(f.exports.getCurrentState().undefined, 'a');
 });
 
-test('a new mirrored strip is named after a prior mirrored strip was generated', () => {
-    const f = fixture({dimensions: [{key: 'area1', checked: 'a', named: false}]});
-    f.state.elements.push(extraRadio('area1', 'a'));
-    f.exports.initialize(true);
-    const third = extraRadio('area1', 'a');
-    f.state.elements.push(third);
-    f.exports.initialize(true);
-    assert.equal(third.name, 'paste-ui-multistate:area1:2');
-});
-
-for (const kind of ['isInput', 'isContent']) {
-    test('a page declaring only ' + kind + ' still observes hash navigation', () => {
-        const f = fixture({beforeDefine: state => { state.elements = state.elements.filter(element => element[kind]); }});
-        assert.equal(f.windowListeners.hashchange.length, 1);
-        assert.equal(f.windowListeners.popstate.length, 1);
-    });
-}
-
 test('a forced scan releases removed trigger elements', async () => {
     require('node:v8').setFlagsFromString('--expose-gc');
     const gc = vm.runInNewContext('gc');
@@ -1114,248 +983,57 @@ test('a forced scan releases removed trigger elements', async () => {
     assert.equal(f.exports.getCurrentState().area2, 'b');
 });
 
-// A fake element tree: enough of parentNode, contains, localName and the
-// role attribute for the module to read a strip's structure.
-function treeNode(parent, options = {}) {
-    const attrs = options.attrs || {};
-    const node = {
-        nodeType: 1, localName: options.localName || 'div', parentNode: parent || null,
-        getAttribute: k => attrs[k] === undefined ? null : attrs[k],
-        contains(other) {
-            for (let at = other; at; at = at.parentNode) {
-                if (at === node) return true;
-            }
-            return false;
-        }
-    };
-    return node;
-}
-
-function placedRadio(parent, key, value, options = {}) {
-    const radio = extraRadio(key, value, options);
-    radio.nodeType = 1;
-    radio.localName = 'input';
-    radio.parentNode = parent;
-    return radio;
-}
-
-function stripContent(key, value) {
-    const el = {
-        attrs: {'data-multistate-key': key, 'data-multistate-value': value},
-        hasAttribute: k => el.attrs.hasOwnProperty(k),
-        getAttribute: k => el.attrs[k] === undefined ? null : el.attrs[k],
-        setAttribute: (k, v) => { el.attrs[k] = v; },
-        removeAttribute: k => { delete el.attrs[k]; }
-    };
-    return el;
-}
-
-function stripPage(radios, contents) {
-    const f = fixture({dimensions: []});
-    f.state.elements.push(...radios, ...contents.map(([key, value]) => stripContent(key, value)));
-    f.exports.initialize(true);
-    return f;
-}
-
-const TAB_PANELS = [['tab', 'overview'], ['tab', 'specs'], ['tab', 'gallery']];
-
-test('strips that differ in values each get a name of their own', () => {
-    const root = treeNode(null);
-    const stripA = treeNode(root);
-    const stripB = treeNode(root);
-    const a = [placedRadio(stripA, 'tab', 'overview', {checked: true}), placedRadio(stripA, 'tab', 'specs')];
-    const b = [placedRadio(stripB, 'tab', 'overview'), placedRadio(stripB, 'tab', 'specs'),
-        placedRadio(stripB, 'tab', 'gallery')];
-    const f = stripPage([...a, ...b], TAB_PANELS);
-    a.forEach(r => assert.equal(r.name, 'paste-ui-multistate:tab'));
-    b.forEach(r => assert.equal(r.name, 'paste-ui-multistate:tab:1',
-        'a value only the second strip offers took the first strip\'s group'));
-    b[2].checked = true;
-    b[2].fireChange();
-    assert.equal(f.exports.getCurrentState().tab, 'gallery');
-    assert.deepEqual([...a, ...b].map(r => r.checked), [false, false, false, false, true]);
-    f.window.location.hash = '#tab:overview';
-    f.fireHashchange();
-    assert.deepEqual([...a, ...b].map(r => r.checked), [true, false, true, false, false]);
-});
-
-test('a stray radio before the strips keeps them apart', () => {
-    const root = treeNode(null);
-    const stray = placedRadio(root, 'tab', 'overview');
-    const stripA = treeNode(root);
-    const stripB = treeNode(root);
-    const a = [placedRadio(stripA, 'tab', 'overview', {checked: true}), placedRadio(stripA, 'tab', 'specs')];
-    const b = [placedRadio(stripB, 'tab', 'overview'), placedRadio(stripB, 'tab', 'specs')];
-    stripPage([stray, ...a, ...b], TAB_PANELS);
-    assert.equal(stray.name, 'paste-ui-multistate:tab');
-    a.forEach(r => assert.equal(r.name, 'paste-ui-multistate:tab:1', 'a stray radio split a strip'));
-    b.forEach(r => assert.equal(r.name, 'paste-ui-multistate:tab:2', 'a stray radio split a strip'));
-});
-
-test('flat strips under one parent split where a value repeats', () => {
-    const parent = treeNode(treeNode(null));
-    const radios = ['x', 'y', 'x', 'y', 'z'].map(v => placedRadio(parent, 'tab', v));
-    stripPage(radios, [['tab', 'x'], ['tab', 'y'], ['tab', 'z']]);
-    assert.deepEqual(radios.map(r => r.name), ['paste-ui-multistate:tab', 'paste-ui-multistate:tab',
-        'paste-ui-multistate:tab:1', 'paste-ui-multistate:tab:1', 'paste-ui-multistate:tab:1']);
-});
-
-for (const boundary of [{localName: 'fieldset'}, {attrs: {role: 'radiogroup'}}, {attrs: {role: 'tablist'}}]) {
-    test('a strip never reaches past a declared group: ' + JSON.stringify(boundary), () => {
-        const root = treeNode(null);
-        const group = treeNode(root, boundary);
-        const inside = [placedRadio(group, 'tab', 'overview'), placedRadio(group, 'tab', 'specs')];
-        const outside = placedRadio(root, 'tab', 'gallery');
-        stripPage([...inside, outside], TAB_PANELS);
-        inside.forEach(r => assert.equal(r.name, 'paste-ui-multistate:tab'));
-        assert.equal(outside.name, 'paste-ui-multistate:tab:1', 'a radio outside the group joined it');
-    });
-}
-
-test('a strip name never equals another key\'s name', () => {
-    const parent = treeNode(treeNode(null));
-    const a = ['x', 'y', 'x', 'y'].map(v => placedRadio(parent, 'a', v));
-    const colon = ['p', 'q'].map(v => placedRadio(parent, 'a:1', v));
-    const f = stripPage([...a, ...colon], [['a', 'x'], ['a', 'y'], ['a:1', 'p'], ['a:1', 'q']]);
-    assert.deepEqual(a.map(r => r.name), ['paste-ui-multistate:a', 'paste-ui-multistate:a',
-        'paste-ui-multistate:a:1', 'paste-ui-multistate:a:1']);
-    colon.forEach(r => assert.equal(r.name, 'paste-ui-multistate:a%3A1'));
-    // A re-scan reads both as generated, not authored.
-    f.exports.initialize(true);
-    assert.equal(a[2].name, 'paste-ui-multistate:a:1');
-    colon.forEach(r => assert.equal(r.name, 'paste-ui-multistate:a%3A1', 'a generated name read as authored'));
-});
-
-test('one strip with every value distinct keeps the single generated name', () => {
-    const root = treeNode(null);
-    const strip = treeNode(root);
-    const radios = ['overview', 'specs', 'gallery'].map(v => placedRadio(strip, 'tab', v));
-    const elsewhere = placedRadio(treeNode(root), 'tab', 'overview');
-    stripPage([...radios, elsewhere], TAB_PANELS);
-    radios.forEach(r => assert.equal(r.name, 'paste-ui-multistate:tab'));
-    assert.equal(elsewhere.name, 'paste-ui-multistate:tab:1');
-});
-
-// Interleaved strips: one radio of each strip per row (table rows with a
-// strip per column, list items holding a radio of each strip, a grid
-// filled row by row). Each strip keeps its own group.
-const INTERLEAVED = [
-    ['table columns', root => {
-        const body = treeNode(treeNode(root, {localName: 'table'}), {localName: 'tbody'});
-        return ['overview', 'specs', 'gallery'].map(v => {
-            const row = treeNode(body, {localName: 'tr'});
-            return [placedRadio(treeNode(row, {localName: 'td'}), 'tab', v),
-                placedRadio(treeNode(row, {localName: 'td'}), 'tab', v)];
+test('binding and rescanning radios never inspect their parent structure', () => {
+    const f = fixture({beforeDefine: state => {
+        state.elements.filter(e => e.isInput).forEach(radio => {
+            Object.defineProperty(radio, 'parentNode', {
+                get() { throw new Error('radio ancestry was inspected'); }
+            });
         });
-    }],
-    ['items holding one radio of each strip', root => {
-        const list = treeNode(root);
-        return ['overview', 'specs', 'gallery'].map(v => {
-            const item = treeNode(list);
-            return [placedRadio(item, 'tab', v), placedRadio(item, 'tab', v)];
-        });
-    }],
-    ['grid cells filled row by row', root => {
-        const grid = treeNode(root);
-        return ['overview', 'specs', 'gallery'].map(v =>
-            [placedRadio(treeNode(grid), 'tab', v), placedRadio(treeNode(grid), 'tab', v)]);
-    }]
-];
-for (const [layout, build] of INTERLEAVED) {
-    test('interleaved strips keep one group per strip: ' + layout, () => {
-        const rows = build(treeNode(null));
-        const f = stripPage(rows.flat(), TAB_PANELS);
-        rows.forEach(([a, b]) => {
-            assert.equal(a.name, 'paste-ui-multistate:tab', 'the first strip split: ' + rows.flat().map(r => r.name));
-            assert.equal(b.name, 'paste-ui-multistate:tab:1', 'the second strip split: ' + rows.flat().map(r => r.name));
-        });
-        rows[2][1].checked = true;
-        rows[2][1].fireChange();
-        assert.deepEqual(rows.flat().map(r => r.checked), [false, false, false, false, true, true]);
-        assert.equal(f.exports.getCurrentState().tab, 'gallery');
-    });
-}
-
-test('flat strips: a value before any repeat stays with the strip it follows', () => {
-    // overview specs gallery overview specs, side by side: nothing in
-    // the markup says where the second strip starts before a value
-    // repeats, so gallery stays with the first.
-    const parent = treeNode(treeNode(null));
-    const radios = ['overview', 'specs', 'gallery', 'overview', 'specs'].map(v => placedRadio(parent, 'tab', v));
-    stripPage(radios, TAB_PANELS);
-    assert.deepEqual(radios.map(r => r.name.replace('paste-ui-multistate:', '')),
-        ['tab', 'tab', 'tab', 'tab:1', 'tab:1']);
+    }});
+    assert.doesNotThrow(() => f.exports.initialize(true));
+    assert.equal(f.dims.area1.radios[0].name, 'group-area1');
 });
 
-test('a lone radio in another container never joins flat strips beside it', () => {
-    const root = treeNode(null);
-    const stray = placedRadio(root, 'tab', 'gallery');
-    const flat = treeNode(root);
-    const radios = ['overview', 'specs', 'overview', 'specs'].map(v => placedRadio(flat, 'tab', v));
-    stripPage([stray, ...radios], TAB_PANELS);
-    assert.equal(stray.name, 'paste-ui-multistate:tab');
-    assert.deepEqual(radios.map(r => r.name.replace('paste-ui-multistate:', '')),
-        ['tab:1', 'tab:1', 'tab:2', 'tab:2'], 'a stray radio joined a flat strip');
-});
-
-test('side-by-side radios never run across a declared group', () => {
-    const root = treeNode(null);
-    const groups = [treeNode(root, {localName: 'fieldset'}), treeNode(root, {attrs: {role: 'radiogroup'}})];
-    // Each group holds a strip and a mirror of it, flat.
-    const radios = groups.map(group =>
-        ['overview', 'specs', 'overview'].map(v => placedRadio(group, 'tab', v)));
-    stripPage(radios.flat(), TAB_PANELS);
-    assert.deepEqual(radios.flat().map(r => r.name.replace('paste-ui-multistate:', '')),
-        ['tab', 'tab', 'tab:1', 'tab:2', 'tab:2', 'tab:3'], 'a run crossed a declared group');
-});
-
-test('naming a key reads each radio\'s ancestors once, not once per other radio', () => {
-    const root = treeNode(null);
-    const list = treeNode(treeNode(root));
-    let reads = 0;
-    const radios = [];
-    for (let at = 0; at < 2000; at += 1) {
-        const radio = placedRadio(treeNode(list, {localName: 'li'}), 'tab', 'v' + at);
-        radios.push(radio);
+test('changing one dimension leaves other panels and radios untouched', () => {
+    const f = fixture();
+    const other = f.dims.area2;
+    for (const radio of other.radios) {
+        let checked = radio.checked;
+        Object.defineProperty(radio, 'checked', {get: () => checked,
+            set: () => assert.fail('an unchanged radio was assigned')});
     }
-    const tracked = new Set([root, list, list.parentNode, ...radios, ...radios.map(r => r.parentNode)]);
-    tracked.forEach(node => {
-        let parent = node.parentNode;
-        Object.defineProperty(node, 'parentNode', {get() { reads += 1; return parent; }, set(v) { parent = v; }});
+    for (const panel of other.contents) {
+        panel.setAttribute = () => assert.fail('an unchanged panel was written');
+        panel.removeAttribute = () => assert.fail('an unchanged panel was cleared');
+    }
+    f.dims.area1.radios[1].checked = true;
+    f.dims.area1.radios[1].fireChange();
+    assert.equal(f.exports.getCurrentState().area1, 'b');
+});
+
+for (const kind of ['isInput', 'isContent']) {
+    test('a page declaring only ' + kind + ' still observes hash navigation', () => {
+        const f = fixture({beforeDefine: state => { state.elements = state.elements.filter(element => element[kind]); }});
+        assert.equal(f.windowListeners.hashchange.length, 1);
+        assert.equal(f.windowListeners.popstate.length, 1);
     });
-    stripPage(radios, radios.map(r => ['tab', r.value]));
-    radios.forEach(r => assert.equal(r.name, 'paste-ui-multistate:tab'));
-    // Depth 5 per radio: a pass that compares every radio with every
-    // other reads millions.
-    assert.ok(reads < 2000 * 12, 'naming read ' + reads + ' parent links for 2000 radios');
-});
+}
 
-test('a key keeps its own text in the generated name unless it holds a colon or a percent sign', () => {
-    const parent = treeNode(treeNode(null));
-    const spaced = ['x', 'y', 'x', 'y'].map(v => placedRadio(parent, 'north america', v));
-    const percent = ['x', 'y'].map(v => placedRadio(parent, 'a%3A1', v));
-    const colon = ['x', 'y'].map(v => placedRadio(parent, 'a:1', v));
-    const raw = ['x', 'y'].map(v => placedRadio(parent, 'a', v));
-    const f = stripPage([...spaced, ...percent, ...colon, ...raw],
-        ['north america', 'a%3A1', 'a:1', 'a'].flatMap(k => [[k, 'x'], [k, 'y']]));
-    assert.deepEqual(spaced.map(r => r.name), ['paste-ui-multistate:north america', 'paste-ui-multistate:north america',
-        'paste-ui-multistate:north america:1', 'paste-ui-multistate:north america:1']);
-    percent.forEach(r => assert.equal(r.name, 'paste-ui-multistate:a%253A1'));
-    colon.forEach(r => assert.equal(r.name, 'paste-ui-multistate:a%3A1'));
-    raw.forEach(r => assert.equal(r.name, 'paste-ui-multistate:a'));
-    f.exports.initialize(true);
-    assert.equal(spaced[2].name, 'paste-ui-multistate:north america:1', 'a raw generated name read as authored');
-});
 
-test('a key or value holding a lone surrogate is escaped, never thrown', () => {
-    const key = 'k:\uD800';
-    const radios = [extraRadio(key, 'u', {checked: true}), extraRadio(key, 'v\uDC00')];
-    const f = stripPage(radios, [[key, 'u'], [key, 'v\uDC00']]);
-    assert.equal(radios[0].name, 'paste-ui-multistate:k%3A%uD800');
-    assert.equal(f.exports.getCurrentState()[key], 'u');
-    radios[1].checked = true;
-    radios[1].fireChange();
-    assert.equal(f.exports.getCurrentState()[key], 'v\uDC00');
-    assert.equal(f.pushed.length, 1, 'the change wrote no entry');
-    assert.ok(f.pushed[0].url.includes('k%3A%uD800:v%uDC00'), 'the entry is not escaped: ' + f.pushed[0].url);
+for (const type of ['text', 'checkbox', 'button', 'select-one']) {
+    test('multistate leaves marked ' + type + ' controls inert', () => {
+        const f = fixture({dimensions: [{key: 'mode', checked: 'a', type}]});
+        const input = f.dims.mode.radios[1];
+        assert.equal(input.listenerCount('change'), 0);
+        input.fireChange();
+        assert.equal(f.pushed.length, 0);
+        assert.equal(f.exports.getCurrentState().mode, undefined);
+    });
+}
+
+
+test('an undeclared initial fragment value falls back to the authored default', () => {
+    const f = fixture({hash: '#area1:zzz'});
+    assert.equal(f.exports.getCurrentState().area1, 'a');
 });

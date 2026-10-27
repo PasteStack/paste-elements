@@ -1,4 +1,4 @@
-/*jslint browser:true plusplus:true sub:true */
+/*jslint browser:true continue:true plusplus:true sub:true */
 /*globals paste */
 
 /**
@@ -254,15 +254,12 @@ paste['define'](
             NativeMutationObserver = $w['MutationObserver'],
             NativeIntersectionObserver = $w['IntersectionObserver'],
             NativeWeakMap = $w['WeakMap'],
-            $isFinite = isFinite,
-            $parseFloat = parseFloat,
-            $floor = Math['floor'],
-            $abs = Math['abs'],
             $create = Object['create'],
             Subscription = event['Event']['Subscription'],
             requestPhased = animation_frame['requestPhased'],
             capFrom = imageresolution['capFrom'],
             needFor = imageresolution['needFor'],
+            paintedBox = imageresolution['paintedBox'],
             selectCandidate = imageresolution['selectCandidate'],
             cssUrl = imageresolution['cssUrl'],
             cssUrlSource = imageresolution['cssUrlSource'],
@@ -286,6 +283,19 @@ paste['define'](
             // A srcset candidate URL ends at the first whitespace.
             whitespace = /\s/,
             hosts = [],
+            byElement = null,
+            hostFor = function (element) {
+                var index = hosts.length;
+                if (byElement) {
+                    return byElement.get(element);
+                }
+                while (index--) {
+                    if (hosts[index].element === element) {
+                        return hosts[index];
+                    }
+                }
+                return null;
+            },
             // The img hosts authored loading="lazy" that have not yet
             // come near the top-level viewport. Without a proximity
             // observer the page's and their ancestors' scroll re-check
@@ -330,23 +340,11 @@ paste['define'](
             readPass,
             writePass,
 
-            // The module's one pending frame pass. The mark is set
-            // before requesting so the pass is armed once per frame
-            // however many inputs arrive before it runs; requestPhased
-            // never runs the pass inside the call and, by its contract,
-            // never throws. Defence in depth: an animation_frame that
-            // throws anyway clears the mark, so the next input asks
-            // again rather than waiting forever on a frame nothing
-            // armed.
+            // One native asynchronous frame carries each pending pass.
             schedule = function () {
-                if (frameRequested) {
-                    return;
-                }
-                frameRequested = true;
-                try {
+                if (!frameRequested) {
+                    frameRequested = true;
                     requestPhased(readPass, writePass);
-                } catch (refused) {
-                    frameRequested = false;
                 }
             },
 
@@ -395,35 +393,26 @@ paste['define'](
             // like a scrolled one. Entries arrive in time order, so the
             // walk runs forward and the last one for a host stands. An
             // entry naming no deferred host, or carrying no boolean
-            // verdict, is skipped on its own, and a list whose length is
-            // not a whole count reports nothing.
+            // verdict, is skipped on its own.
             proximityDelivery = function (entries) {
-                var count = entries ? entries.length : 0,
+                var count = entries.length,
                     entryIndex = 0,
                     entry,
                     target,
                     verdict,
-                    index,
                     host,
                     marked = false;
-                if (typeof count !== 'number' || !$isFinite(count) ||
-                        count < 0 || count !== $floor(count)) {
-                    return;
-                }
                 while (count--) {
                     entry = entries[entryIndex];
                     entryIndex += 1;
-                    target = entry ? entry.target : null;
-                    verdict = entry ? entry.isIntersecting : null;
-                    index = target && typeof verdict === 'boolean' ? deferred.length : 0;
-                    while (index--) {
-                        host = deferred[index];
-                        if (host.element === target) {
-                            host.near = verdict;
-                            if (verdict) {
-                                host.probe = true;
-                                marked = true;
-                            }
+                    target = entry.target;
+                    verdict = entry.isIntersecting;
+                    host = target && typeof verdict === 'boolean' ? hostFor(target) : null;
+                    if (host && host.lazy) {
+                        host.near = verdict;
+                        if (verdict) {
+                            host.probe = true;
+                            marked = true;
                         }
                     }
                 }
@@ -735,7 +724,7 @@ paste['define'](
             evaluate = function (host, cap, need) {
                 var representations = host.representations,
                     failed = host.failed,
-                    chosen = selectCandidate(representations, need, cap),
+                    chosen,
                     withheld = host.withheld,
                     failedWidth,
                     pending,
@@ -763,6 +752,8 @@ paste['define'](
                     // looks at the demand as it stands then.
                     return;
                 }
+                // Selection is useful only when this host can admit.
+                chosen = selectCandidate(representations, need, cap);
                 // A source that already failed is not retried on later
                 // reevaluations — the URL is the same miss however the
                 // geometry that asked for it moved. The memory is per
@@ -832,23 +823,20 @@ paste['define'](
             },
 
             // A ResizeObserver delivery: every host a reported target
-            // can move is dirtied. A malformed list reports nothing; a
-            // missing entry or target skips only itself — valid
-            // entries still deliver.
+            // can move is dirtied. Stale reports for unwatched boxes
+            // schedule no work.
             observerDelivery = function (entries) {
-                var entryIndex = entries ? entries.length : 0,
+                var entryIndex = entries.length,
                     memberIndex,
                     entry,
                     record,
-                    members;
-                if (typeof entryIndex !== 'number' || !$isFinite(entryIndex) ||
-                        entryIndex < 0 || entryIndex !== $floor(entryIndex)) {
-                    return;
-                }
+                    members,
+                    changed = false;
                 while (entryIndex--) {
                     entry = entries[entryIndex];
-                    record = entry && entry.target ? observed.get(entry.target) : null;
+                    record = observed.get(entry.target);
                     if (record) {
+                        changed = true;
                         members = record.hosts;
                         memberIndex = members.length;
                         while (memberIndex--) {
@@ -856,7 +844,9 @@ paste['define'](
                         }
                     }
                 }
-                schedule();
+                if (changed) {
+                    schedule();
+                }
             },
 
             // Attribute mutations on img hosts: a record whose host's
@@ -865,25 +855,14 @@ paste['define'](
             // down. The module's own writes leave the attributes equal
             // to what it owns and mark nothing.
             mutationDelivery = function (records) {
-                var recordIndex = records ? records.length : 0,
-                    target,
-                    index,
+                var recordIndex = records.length,
                     host,
                     marked = false;
-                if (typeof recordIndex !== 'number' || !$isFinite(recordIndex) ||
-                        recordIndex < 0 || recordIndex !== $floor(recordIndex)) {
-                    return;
-                }
                 while (recordIndex--) {
-                    target = records[recordIndex] ? records[recordIndex].target : null;
-                    index = target ? hosts.length : 0;
-                    while (index--) {
-                        host = hosts[index];
-                        if (host.element === target && host.owned && !host.dirty &&
-                                !attributesOwned(host)) {
-                            host.dirty = true;
-                            marked = true;
-                        }
+                    host = hostFor(records[recordIndex].target);
+                    if (host && host.owned && !host.dirty && !attributesOwned(host)) {
+                        host.dirty = true;
+                        marked = true;
                     }
                 }
                 if (marked) {
@@ -1026,6 +1005,10 @@ paste['define'](
                     }
                     return;
                 }
+                // A base-only declaration has no work to observe.
+                if (!parsed['upgrades'].length) {
+                    return;
+                }
                 host = {
                     element: element,
                     property: declaredProperty,
@@ -1128,7 +1111,18 @@ paste['define'](
                     }
                     deferred.push(host);
                 }
+                if (!hosts.length && typeof NativeWeakMap === 'function') {
+                    try {
+                        byElement = new NativeWeakMap();
+                    } catch (indexRefused) {
+                        // Keep the established scan fallback when indexing is unavailable.
+                        byElement = null;
+                    }
+                }
                 hosts.push(host);
+                if (byElement) {
+                    byElement.set(element, host);
+                }
                 dirty(host);
             },
 
@@ -1152,130 +1146,6 @@ paste['define'](
                     return host.near === true;
                 }
                 return rect !== null && nearPage(rect);
-            },
-
-            // A computed length in px; anything unreadable is none.
-            computedLength = function (style, name) {
-                var length = $parseFloat(style.getPropertyValue(name));
-                return length > 0 ? length : 0;
-            },
-
-            // The first layer's keyword of a layered background value.
-            firstLayer = function (value) {
-                return (value || '').split(',')[0].trim();
-            },
-
-            // The viewport, without scrollbars: the root element's
-            // client box. In quirks mode neither the root element nor
-            // the body reports it in every engine — either can answer
-            // its own box — so the window's inner size, scrollbars
-            // included, stands in.
-            viewportBox = function () {
-                var root = $doc.compatMode === 'BackCompat' ? null : $doc.documentElement;
-                return {
-                    width: (root && root.clientWidth) || $w.innerWidth || 0,
-                    height: (root && root.clientHeight) || $w.innerHeight || 0
-                };
-            },
-
-            // An img's content box, or a background's origin box for its
-            // first layer's attachment — over the scrollable content for
-            // 'local' on a box that scrolls — from the border-box rect
-            // and the pass's own style read. Padding, border and
-            // scrollable size are layout lengths: where the rect differs
-            // from the layout size by more than rounding, a transform
-            // scales the rendered box, and the lengths scale with it.
-            originBox = function (host, rect, style, attachment) {
-                var element = host.element,
-                    origin = 'content-box',
-                    overflow,
-                    local = false,
-                    offsetWidth = element.offsetWidth,
-                    offsetHeight = element.offsetHeight,
-                    borderX,
-                    borderY,
-                    paddingX = 0,
-                    paddingY = 0,
-                    scaleX = 1,
-                    scaleY = 1,
-                    width,
-                    height;
-                if (host.property === 'background-image') {
-                    // A box overflow does not apply to — an inline box —
-                    // reports no client or scrollable size: it keeps its
-                    // origin box.
-                    overflow = style.getPropertyValue('overflow-x');
-                    local = attachment === 'local' && overflow !== '' &&
-                        overflow !== 'visible' && overflow !== 'clip' &&
-                        element.clientWidth > 0 && element.clientHeight > 0 &&
-                        element.scrollWidth > 0 && element.scrollHeight > 0;
-                    origin = firstLayer(style.getPropertyValue('background-origin'));
-                }
-                if (origin === 'border-box' && !local) {
-                    return rect;
-                }
-                borderX = computedLength(style, 'border-left-width') +
-                    computedLength(style, 'border-right-width');
-                borderY = computedLength(style, 'border-top-width') +
-                    computedLength(style, 'border-bottom-width');
-                if (origin === 'content-box') {
-                    paddingX = computedLength(style, 'padding-left') +
-                        computedLength(style, 'padding-right');
-                    paddingY = computedLength(style, 'padding-top') +
-                        computedLength(style, 'padding-bottom');
-                }
-                if (!local && borderX + paddingX === 0 && borderY + paddingY === 0) {
-                    return rect;
-                }
-                if (offsetWidth > 0 && $abs(rect.width - offsetWidth) > 1) {
-                    scaleX = rect.width / offsetWidth;
-                }
-                if (offsetHeight > 0 && $abs(rect.height - offsetHeight) > 1) {
-                    scaleY = rect.height / offsetHeight;
-                }
-                if (local) {
-                    // The scrollable size is the padding box of the
-                    // content, past the border; the border box adds it
-                    // back.
-                    width = element.scrollWidth - paddingX +
-                        (origin === 'border-box' ? borderX : 0);
-                    height = element.scrollHeight - paddingY +
-                        (origin === 'border-box' ? borderY : 0);
-                } else {
-                    width = (rect.width / scaleX) - borderX - paddingX;
-                    height = (rect.height / scaleY) - borderY - paddingY;
-                }
-                width *= scaleX;
-                height *= scaleY;
-                return {width: width > 0 ? width : 0, height: height > 0 ? height : 0};
-            },
-
-            // The box the image is sized against, from the border-box
-            // rect and the pass's own style read: an img's content box;
-            // a background's positioning area — the box its
-            // background-origin names (the padding box by default),
-            // measured over the whole scrollable content for a 'local'
-            // attachment on a box that scrolls (one with a client box
-            // and a scrollable size). A 'fixed' attachment paints
-            // against the viewport where the engine honours it and
-            // against that same origin box where it paints 'scroll'
-            // instead, which this read cannot tell apart: the larger of
-            // the two in each dimension covers either — a larger fetch,
-            // never a blurrier image (an unrendered host keeps its empty
-            // box).
-            paintedBox = function (host, rect, style) {
-                var attachment = host.property === 'background-image' ?
-                        firstLayer(style.getPropertyValue('background-attachment')) : '',
-                    box = originBox(host, rect, style, attachment),
-                    viewport;
-                if (attachment !== 'fixed' || (rect.width === 0 && rect.height === 0)) {
-                    return box;
-                }
-                viewport = viewportBox();
-                return {
-                    width: box.width > viewport.width ? box.width : viewport.width,
-                    height: box.height > viewport.height ? box.height : viewport.height
-                };
             },
 
             // Declaration order is the bind order. One host's failure —
@@ -1328,15 +1198,22 @@ paste['define'](
                 // near, or one a scroll moved, is probed — by that
                 // verdict, or by its box alone where no observer watches
                 // it; once near it is read in full.
-                if (host.owned && host.probe && !host.dirty) {
+                if (host.owned && host.lazy && (host.probe || host.dirty)) {
                     host.probe = false;
                     if (!host.watched) {
                         rect = element.getBoundingClientRect ?
                                 element.getBoundingClientRect() : null;
                     }
-                    if (nearNow(host, rect)) {
-                        host.dirty = true;
+                    if (!nearNow(host, rect)) {
+                        host.dirty = false;
+                        // The write phase still checks image ownership;
+                        // a deferred host needs no style or size policy.
+                        host.passCap = 'auto';
+                        host.passNeed = 0;
+                        continue;
                     }
+                    undefer(host);
+                    host.dirty = true;
                 }
                 if (host.owned && (host.dirty || host.verify)) {
                     style = computedStyle(element);
@@ -1355,9 +1232,6 @@ paste['define'](
                         if (rect === null) {
                             rect = element.getBoundingClientRect ?
                                     element.getBoundingClientRect() : null;
-                        }
-                        if (host.lazy && nearNow(host, rect)) {
-                            undefer(host);
                         }
                         box = rect && read ? paintedBox(host, rect, style) : rect;
                         host.passNeed = box ? needFor(

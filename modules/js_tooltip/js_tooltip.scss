@@ -1,0 +1,8 @@
+/*
+@module "paste.ui.js_tooltip";
+*/
+@import "mixin";
+
+.ui-js-tooltip {
+  @include paste-ui-js-tooltip();
+}

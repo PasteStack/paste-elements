@@ -1,0 +1,7 @@
+// Explicit default presentation; the consumer may choose its own selector.
+@import "../../base/variables";
+@import "mixin";
+
+.#{$paste-prefix}-address {
+  @include paste-ui-address();
+}

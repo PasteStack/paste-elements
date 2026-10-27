@@ -2,6 +2,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.ReducedMotion;
 import com.microsoft.playwright.options.WaitUntilState;
@@ -156,6 +157,17 @@ public final class ElementsBrowserChecks {
     // set — a fixture must report on all of them, not on a selection it
     // prefers. serve-examples.test.cjs keeps it equal to the declared srcs.
     private static final List<String> IDENTITY_PATHS = List.of(
+        "/js/paste/ui/fragment_navigation.js",
+        "/js/paste/ui/allowed_chars.js",
+        "/js/paste/ui/select.js",
+        "/js/paste/ui/form/form_autosave.js",
+        "/js/paste/ui/imageupload.js",
+        "/js/paste/ui/js_tooltip.js",
+        "/js/paste/ui/navigate_on_change.js",
+        "/js/paste/ui/prevent_double_submit.js",
+        "/js/paste/ui/sortable.js",
+        "/js/paste/ui/update_text_on_input_change.js",
+
         "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js",
         "/js/paste/oop.js", "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
         "/js/paste/polyfills/getcomputedstyle.js",
@@ -168,21 +180,22 @@ public final class ElementsBrowserChecks {
         "/js/paste/ui/scrollscrub.js",
         "/js/paste/ui/progressiveresolution.js",
         "/js/paste/ui/imagesequence.js",
-        "/js/paste/ui/smoothscroll.js",
         "/js/paste/ui/multistate.js",
-        "/js/paste/ui/autogrow.js",
-        "/js/paste/io.js", "/js/paste/ui/form.js", "/js/paste/ui/scrollspy.js");
+        "/js/paste/ui/autogrow.js", "/js/paste/ui/smoothscroll.js",
+        "/js/paste/io.js", "/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/form/form_validity.js", "/js/paste/ui/form/form_html.js", "/js/paste/ui/form/form_apply.js", "/js/paste/ui/lazy_loader.js", "/js/paste/ui/carousel.js", "/js/paste/ui/scrollspy.js");
 
     // Where the runner's own checkout says a served URL lives — the same
     // mapping serve-examples.cjs applies: enhancement modules come from
     // this repository's modules/<name>/<name>.js, the paste.ui.utilities
-    // modules from modules/utilities/<name>/<name>.js; the rest of
+    // modules from modules/utilities/<name>/<name>.js, form modules from
+    // modules/form/<name>/<name>.js; the rest of
     // /js/paste/ resolves inside the supplied paste core tree.
     private static Path servedLocalFile(String urlPath) {
         if (urlPath.startsWith("/js/paste/ui/")) {
             String basename = urlPath.substring(urlPath.lastIndexOf('/') + 1, urlPath.length() - ".js".length());
             Path root = Path.of("modules").toAbsolutePath().normalize();
-            Path tier = urlPath.startsWith("/js/paste/ui/utilities/") ? root.resolve("utilities") : root;
+            Path tier = urlPath.startsWith("/js/paste/ui/utilities/") ? root.resolve("utilities")
+                    : urlPath.startsWith("/js/paste/ui/form/") ? root.resolve("form") : root;
             Path resolved = tier.resolve(basename).resolve(basename + ".js").normalize();
             require(resolved.startsWith(root), "module path escapes the modules tree: " + urlPath);
             return resolved;
@@ -331,10 +344,6 @@ public final class ElementsBrowserChecks {
             List.of(scopeSelector == null || "null".equals(scopeSelector) ? "" : scopeSelector, fraction));
     }
 
-    private static void scrollToRangeEnd(Page page, String scopeSelector) {
-        scrollToRangeFraction(page, scopeSelector, 1);
-    }
-
     // The id a documented example's intro skip control carries, or null
     // when the example declares no intro skip.
     private static String skipIdOf(String markup) {
@@ -460,11 +469,16 @@ public final class ElementsBrowserChecks {
             }
         }
         try (BrowserContext context = browser.newContext(options)) {
+            context.route("**/*", route -> {
+                String host = URI.create(route.request().url()).getHost();
+                if ("127.0.0.1".equals(host) || "localhost".equals(host)) route.resume(); else route.abort();
+            });
             Page page = context.newPage();
             page.setDefaultTimeout(8000);
             page.onPageError(errors::add);
             page.onResponse(response -> {
-                if (response.url().startsWith(url) && !response.ok()) {
+                if (response.url().startsWith(url) && !response.ok() &&
+                    !List.of("xhr", "fetch").contains(response.request().resourceType())) {
                     fixtureFailures.add(response.status() + " " + response.url());
                 }
             });
@@ -542,7 +556,10 @@ public final class ElementsBrowserChecks {
     // every line from the first markup tag through the last </script> —
     // the catalog's JSON body lines travel with it.
     private static List<String> documentedExampleMarkups() throws Exception {
-        String source = Files.readString(Path.of("modules/imagesequence/imagesequence.js"));
+        // Minified runtime checks read the same examples from their source tree.
+        String documentationRoot = System.getenv("ELEMENTS_DOCUMENTATION_ROOT");
+        String source = Files.readString(Path.of(documentationRoot == null ? "." : documentationRoot,
+            "modules/imagesequence/imagesequence.js"));
         Matcher tags = Pattern.compile("(?m)^ \\* @example$").matcher(source);
         Pattern commentLine = Pattern.compile("^ \\* ?(.*)$");
         List<String> markups = new ArrayList<>();
@@ -694,11 +711,12 @@ public final class ElementsBrowserChecks {
     // pages below.
     private static final String[] STICKYNAV_SCRIPTS = {
         "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
-        "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
+        "/js/paste/dom.js", "/js/paste/event.js",
         "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/stickynav.js"};
     private static final String[] SMOOTHSCROLL_SCRIPTS = {
         "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
-        "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/ui/smoothscroll.js"};
+        "/js/paste/dom.js", "/js/paste/event.js",
+        "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/smoothscroll.js"};
     private static final String[] HEROSCROLL_SCRIPTS = {
         "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
         "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
@@ -719,8 +737,7 @@ public final class ElementsBrowserChecks {
         "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/ui/multistate.js"};
     private static final String[] AUTOGROW_SCRIPTS = {
         "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
-        "/js/paste/dom.js", "/js/paste/event.js",
-        "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/autogrow.js"};
+        "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/ui/autogrow.js"};
 
     // An authored regression page: its style and markup, the module
     // chain it declares, then any page script that must run after the
@@ -785,10 +802,6 @@ public final class ElementsBrowserChecks {
         page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 30))))");
     }
 
-    private static boolean stuck(Page page) {
-        return (Boolean) page.evaluate("() => document.documentElement.classList.contains('paste-fixed-subnav')");
-    }
-
     // A frame catalog under checks/: frame i of name is
     // <name>-frame-<i>-<width>x<height>.png, with one sharper rung when
     // upWidth is positive.
@@ -808,13 +821,6 @@ public final class ElementsBrowserChecks {
         }
         return json.append("]}").toString();
     }
-
-    // The previous-sibling kinds that have no in-flow box of their own.
-    private static final List<Map.Entry<String, String>> BOXLESS_SIBLINGS = List.of(
-        Map.entry("script", "<script>window.boxlessSibling = 1;</script>"),
-        Map.entry("hidden", "<div hidden>dismissed banner</div>"),
-        Map.entry("display:contents", "<div style=\"display:contents\"><span>inline bits</span></div>"),
-        Map.entry("position:fixed", "<div style=\"position:fixed;top:0;right:0;width:10px;height:10px\"></div>"));
 
     private static String multistatePage(String extraBody, String after) {
         return checkPage("[data-multistate-value]{display:none}[data-multistate-state]{display:block}",
@@ -841,6 +847,32 @@ public final class ElementsBrowserChecks {
     // touch viewports, base-URL resolution, native lazy loading, nested
     // scrollers, native history and smooth scroll behaviour.
     private static void behaviourRegressions(Browser browser, String engine) {
+        scenario(browser, engine, "scrollspy corrects late content growth without window resize", null,
+            context -> routeCheckPage(context, "spy-late-growth.html", checkPage(
+                "html{scroll-behavior:auto;overflow-anchor:none}nav{position:fixed;top:0;height:40px}" +
+                "section{height:1000px}#spy-gap{height:100px}",
+                "<nav data-paste-scrollspy data-spy-touch><ul><li id=\"spy-first\"><a href=\"#spy-one\">One</a></li>" +
+                "<li id=\"spy-second\"><a href=\"#spy-two\">Two</a></li></ul></nav>" +
+                "<section id=\"spy-one\">One</section><div id=\"spy-gap\"></div><section id=\"spy-two\">Two</section>",
+                new String[]{"/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
+                    "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
+                    "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/scrollspy.js"}, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "spy-late-growth.html");
+                page.evaluate("() => scrollTo(0, 1150)");
+                awaitActive(page, "() => document.getElementById('spy-second').classList.contains('active')");
+                page.evaluate("() => document.getElementById('spy-gap').style.height = '1200px'");
+                // Native scroll anchoring can retain the second section in view.
+                // Return to the original coordinate to test refreshed geometry.
+                frames(page);
+                evidence.put("nativeAnchoredY", page.evaluate("() => scrollY"));
+                page.evaluate("() => scrollTo(0, 1150)");
+                page.waitForFunction("() => document.getElementById('spy-first').classList.contains('active')");
+                evidence.put("afterGrowth", page.evaluate("() => ({y:scrollY, top:document.getElementById('spy-two').getBoundingClientRect().top})"));
+                require(!Boolean.TRUE.equals(page.evaluate("() => document.getElementById('spy-second').classList.contains('active')")),
+                    "the marker retained the section that moved below the viewport");
+            });
+
         scenario(browser, engine, "platform mutation and intersection delivery contracts", null,
             context -> routeCheckPage(context, "observer-parity.html", checkPage(
                 "#far{position:absolute;top:4000px;width:20px;height:20px}",
@@ -941,7 +973,7 @@ public final class ElementsBrowserChecks {
 
         for (String mode : List.of("auto", "smooth", "reduced")) {
             String behavior = mode.equals("auto") ? "auto" : "smooth";
-            scenario(browser, engine, "smoothscroll CSS owns motion and target clearance " + mode,
+            scenario(browser, engine, "native fragment CSS owns motion and target clearance " + mode,
                 Map.of("reducedMotion", mode.equals("reduced") ? ReducedMotion.REDUCE : ReducedMotion.NO_PREFERENCE),
                 context -> routeCheckPage(context, "native-scroll-" + mode + ".html", checkPage(
                     "html{scroll-behavior:" + behavior + ";scroll-padding-top:24px}" +
@@ -949,8 +981,8 @@ public final class ElementsBrowserChecks {
                     ".paste-ui-section-nav{height:48px}#gap{height:1600px}" +
                     "#destination{height:1000px;scroll-margin-top:80px}",
                     "<nav class=\"paste-ui-section-nav\"><a id=\"jump\" href=\"#destination\">Jump</a></nav>" +
-                    "<div id=\"gap\"></div><section id=\"destination\">Destination<input id=\"next\" aria-label=\"Next\"></section>",
-                    SMOOTHSCROLL_SCRIPTS, null), null),
+                    "<div id=\"gap\"></div><section tabindex=\"-1\" id=\"destination\">Destination<input id=\"next\" aria-label=\"Next\"></section>",
+                    new String[0], null), null),
                 (page, evidence) -> {
                     openCheckPage(page, "native-scroll-" + mode + ".html");
                     Map<?, ?> result = (Map<?, ?>) page.evaluate("""
@@ -1034,7 +1066,7 @@ public final class ElementsBrowserChecks {
                     evidence.put("focusAfterTab", page.evaluate("() => document.activeElement.id"));
                     require("next".equals(evidence.get("focusAfterTab")),
                         "keyboard navigation must continue inside the destination");
-                    require(Boolean.TRUE.equals(page.evaluate("() => !document.getElementById('destination').hasAttribute('tabindex')")),
+                    require(Boolean.TRUE.equals(page.evaluate("() => document.getElementById('destination').getAttribute('tabindex') === '-1'")),
                         "temporary focus attributes must leave when focus moves on");
 
                 });
@@ -1077,7 +1109,119 @@ public final class ElementsBrowserChecks {
                 require(page.evaluate("() => JSON.stringify(deliveries)").equals("[[\"child\"]]"), "reobserve retained the old target");
             });
 
-        scenario(browser, engine, "form replaces only its target after a background submit", null,
+        scenario(browser, engine, "apply posts native successful controls and keeps two forms independent", null,
+            context -> {
+                routeCheckPage(context, "apply.html", checkPage("",
+                    "<form id='one' class='paste-ui-apply' method='post' action='/apply-one'>" +
+                    "<label for='title'>Title</label><input id='title' name='title' required>" +
+                    "<input name='elements' value='native name'><input name='item' value='one'>" +
+                    "<input name='item' value='two'><input type='hidden' name='token' value='retain'>" +
+                    "<button name='intent' value='save'>Save</button></form>" +
+                    "<form id='two' class='paste-ui-apply' method='post' action='/apply-two'>" +
+                    "<input name='title' value='keep'><button>Save second</button></form>",
+                    new String[]{"/js/paste/paste.js", "/js/paste/util.js", "/js/paste/guid.js",
+                        "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/form/form_validity.js", "/js/paste/ui/form/form_apply.js"}, null), null);
+                context.route("**/apply-one", route -> {
+                    String body = route.request().postData();
+                    require(body.contains("item=one&item=two"), "repeated successful controls were lost");
+                    require(body.contains("intent=save") && body.contains("_="), "submitter or request GUID missing");
+                    route.fulfill(new Route.FulfillOptions().setContentType("application/json")
+                        .setBody("{\"success\":{\"message\":\"Saved <safely>\"}}"));
+                });
+                context.route("**/apply-two", route -> route.fulfill(new Route.FulfillOptions()
+                    .setStatus(400).setContentType("application/json")
+                    .setBody("{\"error\":{\"message\":\"Fix title\",\"param\":\"title\"}}")));
+            }, (page, evidence) -> {
+                openCheckPage(page, "apply.html");
+                page.click("#one button");
+                require(page.locator(".paste-ui-apply-success").count() == 0, "invalid submit was taken over");
+                page.fill("#title", "Ready");
+                page.click("#one button");
+                page.waitForSelector("#one .paste-ui-apply-success");
+                active(page.locator("#one .paste-ui-apply-success").textContent().equals("Saved <safely>"), "original success message rendered as text");
+                require(page.locator("#title").inputValue().equals(""), "text field did not clear");
+                require(page.locator("[name=token]").inputValue().equals("retain"), "authored hidden token was erased");
+                require(page.locator("#two input").inputValue().equals("keep"), "other form was changed");
+                page.click("#two button");
+                page.waitForSelector("#two .paste-ui-apply-failure");
+                require(page.locator("#two input").inputValue().equals("keep"), "failed field was erased");
+                require(page.locator("#one .paste-ui-apply-success").count() == 1, "second form replaced first message");
+                require(page.locator("form[aria-busy]").count() == 0, "settled forms remain busy");
+                evidence.put("positiveControl", "successful and failed JSON replies on separate forms");
+            });
+
+        scenario(browser, engine, "fragment_navigation keeps href and places an opted-in article", null,
+            context -> {
+                routeCheckPage(context, "fragment-navigation.html", checkPage("",
+                    "<a href='/fragment-article' data-paste-io-reply-fragment='article'>Read</a>" +
+                    "<section data-paste-io-reply-fragment-target='article'>Previous article</section>",
+                    new String[]{"/js/paste/paste.js", "/js/paste/util.js", "/js/paste/oop.js", "/js/paste/guid.js", "/js/paste/dom.js",
+                        "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/fragment_navigation.js"}, null), null);
+                context.route("**/fragment-article", route -> route.fulfill(new Route.FulfillOptions()
+                    .setContentType("text/html").setBody("<h1>Article response</h1>")));
+            }, (page, evidence) -> {
+                openCheckPage(page, "fragment-navigation.html");
+                page.locator("a").click();
+                awaitActive(page, "() => document.querySelector('section h1') !== null");
+                require(page.url().endsWith("/fragment-article"), "article URL was not committed");
+                require(page.locator("section h1").textContent().equals("Article response"), "article content was not placed");
+                require(page.locator("a").getAttribute("href").equals("/fragment-article"), "native href was changed");
+                evidence.put("positiveControl", "an ordinary href remains usable and its explicit target receives HTML");
+            });
+        scenario(browser, engine, "lazy_loader loads visible declarations once and calls the content hook", null,
+            context -> {
+                routeCheckPage(context, "lazy-content.html", checkPage("",
+                    "<div id='visible' data-lazy-load='/lazy-one'>Waiting</div>" +
+                    "<div hidden id='later' data-lazy-load='/lazy-two'>Later</div>",
+                    new String[]{"/js/paste/paste.js", "/js/paste/util.js", "/js/paste/io.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/lazy_loader.js"}, null), null);
+                context.route("**/lazy-*", route -> {
+                    if (route.request().url().endsWith(".html")) { route.fallback(); return; }
+                    route.fulfill(new Route.FulfillOptions().setContentType("text/html").setBody("<strong>Loaded</strong>"));
+                });
+            }, (page, evidence) -> {
+                openCheckPage(page, "lazy-content.html");
+                page.evaluate("() => { window.hooks=[]; paste.ui.lazy_loader.set_init_new_content(function(el){hooks.push([el.id,this===el]);});" +
+                    "paste.ui.lazy_loader.load_visible_content(document); paste.ui.lazy_loader.load_visible_content(document); }");
+                page.waitForSelector("#visible strong");
+                active(page.locator("#visible strong").textContent().equals("Loaded"), "visible HTML was fetched and inserted");
+                require(page.locator("#later strong").count() == 0, "hidden content was fetched");
+                require(page.evaluate("() => JSON.stringify(hooks)").equals("[[\"visible\",true]]"), "load or hook duplicated");
+                require(page.locator("#visible").getAttribute("data-lazy-load") == null, "successful declaration was retained");
+                page.evaluate("() => { document.getElementById('later').hidden=false; paste.ui.lazy_loader.load_visible_content(document); }");
+                page.waitForSelector("#later strong");
+                require(((Number)page.evaluate("() => hooks.length")).intValue() == 2, "newly visible content was not initialized");
+                evidence.put("positiveControl", "visibility-triggered HTML insertion with original callback receiver");
+            });
+
+        scenario(browser, engine, "carousel restores discrete paging named instances events and disposal", null,
+            context -> routeCheckPage(context, "carousel.html", checkPage(
+                ".paste-ui-carousel{width:300px}.paste-ui-carousel-wrap{overflow:hidden}.paste-ui-carousel-items{display:flex;position:relative}.paste-ui-carousel-item{flex:0 0 100%}",
+                "<div class='paste-ui-carousel' data-paste-carousel-name='gallery' data-paste-carousel-indicate data-paste-carousel-count data-paste-carousel-broadcast-moves>" +
+                "<div class='paste-ui-carousel-wrap'><div class='paste-ui-carousel-items'>" +
+                "<div class='paste-ui-carousel-item'>One</div><div class='paste-ui-carousel-item'>Two</div><div class='paste-ui-carousel-item'>Three</div>" +
+                "</div></div></div>",
+                new String[]{"/js/paste/paste.js", "/js/paste/util.js", "/js/paste/guid.js", "/js/paste/event.js",
+                    "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/utilities/mediaquery.js", "/js/paste/ui/carousel.js"}, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "carousel.html");
+                page.waitForSelector(".paste-ui-carousel-loaded");
+                page.evaluate("() => { window.moves=0; document.addEventListener('carouselMove',()=>moves++); }");
+                page.click(".paste-ui-carousel-controls-next");
+                awaitActive(page, "() => paste.ui.carousel.gallery.current === 1 && document.querySelector('.paste-ui-carousel-items').style.left === '-300px'");
+                require(page.locator(".paste-ui-carousel-counter").textContent().equals("2 / 3"), "counter did not track pages");
+                require(page.locator(".paste-ui-carousel-indicator button").count() == 3, "indicators were not built");
+                require(((Number)page.evaluate("() => moves")).intValue() == 1, "move event not delivered on original document target");
+                page.evaluate("() => paste.ui.carousel.gallery.goTo(99)");
+                require(page.locator(".paste-ui-carousel-controls-next").isDisabled(), "last-page control remained enabled");
+                page.evaluate("() => paste.ui.carousel.gallery.dispose()");
+                frames(page);
+                require(page.locator(".paste-ui-carousel-loaded").count() == 0, "dispose retained enhancement class");
+                require(page.locator(".paste-ui-carousel button").count() == 0, "dispose leaked controls");
+                require(page.locator(".paste-ui-carousel-items").getAttribute("style").replace(" ", "").equals(""), "dispose retained left positioning");
+                evidence.put("positiveControl", "original named goTo, page controls and move event");
+            });
+
+        scenario(browser, engine, "formhtml replaces only its target after a background submit", null,
             context -> {
                 routeCheckPage(context, "form-submit.html", checkPage("", 
                     "<p id=\"outside\">Keep this content</p><div id=\"reply\" data-paste-io-reply-fragment-target>" +
@@ -1085,7 +1229,7 @@ public final class ElementsBrowserChecks {
                     "<input name=\"message\" value=\"hello\"><button name=\"intent\" value=\"save\">Send</button>" +
                     "</form></div>",
                     new String[]{"/js/paste/paste.js", "/js/paste/util.js", "/js/paste/guid.js",
-                        "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/form.js"}, null), null);
+                        "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/form/form_validity.js", "/js/paste/ui/form/form_html.js"}, null), null);
                 context.route("**/form-answer", route -> {
                     require("POST".equals(route.request().method()), "the submission must remain POST");
                     require("message=hello&intent=save".equals(route.request().postData()),
@@ -1189,330 +1333,129 @@ public final class ElementsBrowserChecks {
                 evidence.put("requests", transitionRequests);
             });
 
-        // A previous sibling with no in-flow box of its own must not
-        // carry the threshold with the scroll: after a resize deep in the
-        // page the nav stays stuck everywhere past its slot.
-        for (Map.Entry<String, String> sibling : BOXLESS_SIBLINGS) {
-            String pagePath = "sticky-" + sibling.getKey().replaceAll("[^a-z]", "") + ".html";
-            scenario(browser, engine, "stickynav stays stuck after a deep resize with a " + sibling.getKey() + " previous sibling",
-                Map.of("viewport", new int[]{1200, 800}),
-                context -> routeCheckPage(context, pagePath, checkPage(
-                    "#_paste_ui_nav_wrap{height:50px;background:#333;color:#fff}.sn-hero{height:600px;background:#88a}" +
-                    ".sticky-nav-target{height:40px;background:#eee}" +
-                    ".paste-fixed-subnav .sticky-nav-target{position:fixed;top:0;left:0;right:0}" +
-                    ".sn-spacer{height:6000px}",
-                    "<div id=\"_paste_ui_nav_wrap\">site nav</div><div class=\"sn-hero\">hero</div>" + sibling.getValue() +
-                    "<nav class=\"sticky-nav-target\"><a href=\"#sn-a\">A</a></nav><div class=\"sn-spacer\" id=\"sn-a\">content</div>",
-                    STICKYNAV_SCRIPTS, null), null),
-                (page, evidence) -> {
-                    openCheckPage(page, pagePath);
-                    frames(page);
-                    page.evaluate("() => window.scrollTo(0, 100)");
-                    frames(page);
-                    require(!stuck(page), "the nav is stuck above its slot");
-                    page.evaluate("() => window.scrollTo(0, 2000)");
-                    frames(page);
-                    active(stuck(page), "the nav did not stick deep in the page");
-                    page.setViewportSize(1100, 800);
-                    frames(page);
-                    frames(page);
-                    evidence.put("stuckAfterResize", stuck(page));
-                    // The slot's top sits at 650 and the wrap is 50 tall:
-                    // 700 is past the true threshold of 600.
-                    page.evaluate("() => window.scrollTo(0, 700)");
-                    frames(page);
-                    boolean stuckJustPast = stuck(page);
-                    evidence.put("stuckAt700", stuckJustPast);
-                    require(stuckJustPast, "the nav unstuck past its slot after a resize deep in the page");
-                    page.evaluate("() => window.scrollTo(0, 100)");
-                    frames(page);
-                    require(!stuck(page), "the nav stayed stuck above its slot");
-                });
-        }
-
-        // A transformed previous sibling still anchors the slot: its
-        // layout box, not where the transform draws it, is what the slot
-        // follows. A vw-sized hero with a compositing hint shrinks across
-        // a resize while the nav is stuck; the threshold must shrink with
-        // it. An inline svg has no layout offsets; its rect stands in.
-        for (String[] hint : new String[][]{
-                {"a translateZ(0)", "<div class=\"sn-hero\" style=\"height:50vw;transform:translateZ(0)\">hero</div>"},
-                {"a translate", "<div class=\"sn-hero\" style=\"height:50vw;translate:0 0\">hero</div>"},
-                {"an inline svg", "<svg class=\"sn-hero\" viewBox=\"0 0 2 1\" style=\"display:block;width:100%\"></svg>"}}) {
-            String hintPage = "sticky-hint-" + hint[0].replaceAll("[^a-z]", "") + ".html";
-            scenario(browser, engine, "stickynav follows " + hint[0] + " previous sibling across a resize while stuck",
-                Map.of("viewport", new int[]{1200, 800}),
-                context -> routeCheckPage(context, hintPage, checkPage(
-                    "#_paste_ui_nav_wrap{height:50px;background:#333;color:#fff}.sn-hero{background:#88a}" +
-                    ".sticky-nav-target{height:40px;background:#eee}" +
-                    ".paste-fixed-subnav .sticky-nav-target{position:fixed;top:0;left:0;right:0}" +
-                    ".sn-spacer{height:6000px}",
-                    "<div id=\"_paste_ui_nav_wrap\">site nav</div>" + hint[1] +
-                    "<nav class=\"sticky-nav-target\"><a href=\"#sn-a\">A</a></nav><div class=\"sn-spacer\" id=\"sn-a\">content</div>",
-                    STICKYNAV_SCRIPTS, null), null),
-                (page, evidence) -> {
-                    openCheckPage(page, hintPage);
-                    frames(page);
-                    page.evaluate("() => window.scrollTo(0, 100)");
-                    frames(page);
-                    require(!stuck(page), "the nav is stuck above its slot");
-                    page.evaluate("() => window.scrollTo(0, 2000)");
-                    frames(page);
-                    active(stuck(page), "the nav did not stick deep in the page");
-                    page.setViewportSize(1000, 800);
-                    frames(page);
-                    frames(page);
-                    // The hero is now 500 tall: the slot's top sits at
-                    // 550 and the wrap is 50 tall, so the threshold is
-                    // 500, no longer 600.
-                    evidence.put("heroAfterResize", page.evaluate("() => document.querySelector('.sn-hero').getBoundingClientRect().height"));
-                    page.evaluate("() => window.scrollTo(0, 540)");
-                    frames(page);
-                    evidence.put("stuckAt540", stuck(page));
-                    require(stuck(page), "the nav unstuck past its slot after the sibling above it shrank");
-                    page.evaluate("() => window.scrollTo(0, 460)");
-                    frames(page);
-                    evidence.put("stuckAt460", stuck(page));
-                    require(!stuck(page), "the nav stayed stuck above its slot");
-                    page.evaluate("() => window.scrollTo(0, 540)");
-                    frames(page);
-                    require(stuck(page), "the nav did not stick again past its slot");
-                });
-        }
-
-        // A scroll-linked effect that transforms the previous sibling only
-        // once the page has scrolled: the anchor measured in flow and the
-        // one measured while stuck must be the same element, or the
-        // distance kept between them names the wrong slot.
-        scenario(browser, engine, "stickynav keeps its slot when a scroll-linked transform toggles on the previous sibling",
+        scenario(browser, engine, "stickynav follows explicit independent targets and width eligibility",
             Map.of("viewport", new int[]{1200, 800}),
-            context -> routeCheckPage(context, "sticky-toggled-transform.html", checkPage(
-                "#_paste_ui_nav_wrap{height:50px;background:#333;color:#fff}.sn-hero{height:600px;background:#88a}" +
-                ".sn-para{height:200px;background:#a88}" +
-                ".sticky-nav-target{height:40px;background:#eee}" +
-                ".paste-fixed-subnav .sticky-nav-target{position:fixed;top:0;left:0;right:0}" +
-                ".sn-spacer{height:6000px}",
-                "<div id=\"_paste_ui_nav_wrap\">site nav</div><div class=\"sn-hero\">hero</div>" +
-                "<div class=\"sn-para\" id=\"sn-para\">parallax</div>" +
-                "<nav class=\"sticky-nav-target\"><a href=\"#sn-a\">A</a></nav><div class=\"sn-spacer\" id=\"sn-a\">content</div>" +
-                "<script>addEventListener('scroll', function () { var y = scrollY;" +
-                " document.getElementById('sn-para').style.transform = y > 300 ? 'translateY(' + Math.round(y * 0.05) + 'px)' : '';" +
-                " }, {passive: true});</script>",
+            context -> routeCheckPage(context, "sticky-targets.html", checkPage(
+                "body{margin:0;overflow-anchor:none}#sn-first,#sn-second{height:400px}.sn-nav{height:40px}" +
+                ".paste-ui-sticky-active{position:fixed;top:0}main{height:6000px}",
+                "<section id='sn-first' data-paste-sticky-target>First</section>" +
+                "<section id='sn-second'>Second</section>" +
+                "<nav id='sn-a' class='sn-nav' data-paste-sticky-nav data-sticky-min-width='1000'>A</nav>" +
+                "<nav id='sn-b' class='sn-nav' data-paste-sticky-nav='#sn-second'>B</nav><main>Content</main>",
                 STICKYNAV_SCRIPTS, null), null),
             (page, evidence) -> {
-                openCheckPage(page, "sticky-toggled-transform.html");
+                openCheckPage(page, "sticky-targets.html"); frames(page);
+                String states = "() => ['sn-a','sn-b'].map(id => document.getElementById(id).classList.contains('paste-ui-sticky-active'))";
+                require(page.evaluate(states).equals(List.of(false, false)), "initial state");
+                page.evaluate("() => scrollTo(0, 500)"); frames(page);
+                active(page.evaluate(states).equals(List.of(true, false)), "independent thresholds");
+                page.evaluate("() => scrollTo(0, 900)"); frames(page);
+                require(page.evaluate(states).equals(List.of(true, true)), "second threshold");
+                page.setViewportSize(900, 800); frames(page);
+                require(page.evaluate(states).equals(List.of(false, true)), "local minimum width");
+                page.evaluate("() => {document.getElementById('sn-second').style.height='1200px';scrollTo(0,900);dispatchEvent(new Event('scroll'));}");
                 frames(page);
-                page.evaluate("() => window.scrollTo(0, 100)");
-                frames(page);
-                require(!stuck(page), "the nav is stuck above its slot");
-                page.evaluate("() => window.scrollTo(0, 2000)");
-                frames(page);
-                active(stuck(page), "the nav did not stick deep in the page");
-                active(!"".equals(page.evaluate("() => document.getElementById('sn-para').style.transform")),
-                    "the scroll-linked effect transformed the sibling");
-                page.setViewportSize(1100, 800);
-                frames(page);
-                frames(page);
-                // The slot's top sits at 850 and the wrap is 50 tall:
-                // the threshold is 800 at either width.
-                page.evaluate("() => window.scrollTo(0, 700)");
-                frames(page);
-                evidence.put("stuckAt700", stuck(page));
-                require(!stuck(page), "the nav stayed stuck above its slot after a resize while the sibling was transformed");
-                page.evaluate("() => window.scrollTo(0, 820)");
-                frames(page);
-                evidence.put("stuckAt820", stuck(page));
-                require(stuck(page), "the nav did not stick past its slot");
+                require(page.evaluate(states).equals(List.of(false, false)), "shifted target");
+                require(!(Boolean) page.evaluate("() => document.documentElement.classList.contains('paste-fixed-subnav')"), "root class was written");
+                evidence.put("states", page.evaluate(states));
             });
-
-        // A target with no box (hidden at a breakpoint) has no slot: it
-        // must not read as stuck at the top of the page, which would show
-        // the stuck-state content there. Once a wider viewport shows the
-        // target, the nav sticks at its slot.
-        scenario(browser, engine, "stickynav leaves a target hidden at a breakpoint unstuck",
-            Map.of("viewport", new int[]{700, 700}),
-            context -> routeCheckPage(context, "sticky-hidden-target.html", checkPage(
-                ".sn-hero{height:500px;background:#88a}.sticky-nav-target{height:40px;background:#eee}" +
-                "@media (max-width:800px){.sticky-nav-target{display:none}}" +
-                ".paste-fixed-subnav .sticky-nav-target{position:fixed;top:0;left:0;right:0}" +
-                ".sn-spacer{height:6000px}",
-                "<div class=\"sn-hero\">hero</div>" +
-                "<nav class=\"sticky-nav-target\"><a href=\"#sn-a\">A</a></nav><div class=\"sn-spacer\" id=\"sn-a\">content</div>",
+        scenario(browser, engine, "smoothscroll pushes history without hashchange and preserves movement-only API", null,
+            context -> routeCheckPage(context, "smoothscroll-history.html", checkPage(
+                "main{height:4000px}#destination{position:absolute;top:1200px}",
+                "<a id='jump' href='#destination'>Jump</a><main><section id='destination'>Target</section></main>",
+                SMOOTHSCROLL_SCRIPTS, "window.hashEvents=0;addEventListener('hashchange',()=>window.hashEvents++);"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-history.html");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#jump");
+                awaitActive(page, "() => Math.abs(scrollY-1200)<2");
+                require(page.evaluate("() => location.hash").equals("#destination"), "fragment not pushed");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "missing history entry");
+                require(((Number) page.evaluate("() => window.hashEvents")).intValue() == 0, "synthetic hashchange");
+                page.evaluate("() => paste.ui.smoothscroll.scrollTo(document.body,0)");
+                require(page.evaluate("() => location.hash").equals("#destination"), "movement changed history");
+                page.evaluate("() => history.back()"); page.waitForFunction("() => location.hash === ''");
+                page.evaluate("() => history.forward()"); page.waitForFunction("() => location.hash === '#destination'");
+                evidence.put("historyLength", page.evaluate("() => history.length"));
+            });
+        scenario(browser, engine, "smoothscroll legacy containers delegate new links and retain completion history", null,
+            context -> routeCheckPage(context, "smoothscroll-legacy.html", checkPage(
+                "main{height:4000px}#destination{position:absolute;top:1200px}",
+                "<nav id='legacy' data-paste-smoothscroll></nav><main><section id='destination'>Target</section></main>",
+                SMOOTHSCROLL_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-legacy.html");
+                page.evaluate("() => document.getElementById('legacy').innerHTML='<a id=late href=#destination>Late link</a>'");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#late");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before, "history before completion");
+                awaitActive(page, "() => location.hash === '#destination' && Math.abs(scrollY-1200)<2");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "missing completion history");
+                page.evaluate("() => {scrollTo(0,0);new paste.event.Event(window,'smoothscroll').fire({newURL:'destination',verticalOffset:80,updateHash:false});}");
+                page.waitForFunction("() => Math.abs(scrollY-1120)<2");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "updateHash:false wrote history");
+                evidence.put("offsetLanding", page.evaluate("() => scrollY"));
+            });
+        scenario(browser, engine, "autogrow class-only fields retain keyup and grow-only behavior", null,
+            context -> routeCheckPage(context, "legacy-autogrow.html", checkPage("textarea{width:100px}",
+                "<textarea class='autogrow' rows='1'></textarea>", AUTOGROW_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "legacy-autogrow.html");
+                double before = ((Number) page.evaluate("() => document.querySelector('textarea').offsetHeight")).doubleValue();
+                page.evaluate("() => {const e=document.querySelector('textarea');e.value='line\\n'.repeat(20);e.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true}));}");
+                double grown = ((Number) page.evaluate("() => document.querySelector('textarea').offsetHeight")).doubleValue();
+                active(grown > before, "class-only keyup did not grow");
+                page.evaluate("() => {const e=document.querySelector('textarea');e.value='';e.dispatchEvent(new Event('input',{bubbles:true}));}");
+                require(((Number) page.evaluate("() => document.querySelector('textarea').offsetHeight")).doubleValue() == grown, "deletion shrank the field");
+                evidence.put("height", grown);
+            });
+        scenario(browser, engine, "form ordinary validation survives without background opt-in", null,
+            context -> routeCheckPage(context, "legacy-form.html", checkPage("",
+                "<form><input required name='name'><input required name='other'><button>Submit</button></form>",
+                new String[]{"/js/paste/paste.js","/js/paste/guid.js","/js/paste/util.js","/js/paste/oop.js","/js/paste/dom.js","/js/paste/event.js","/js/paste/io.js","/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/form/form_validity.js"}, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "legacy-form.html");
+                require(!(Boolean) page.evaluate("() => document.querySelector('form').noValidate"), "ordinary form lost native validation");
+                page.locator("[name=name]").dispatchEvent("keyup");
+                require(page.locator("[name=other]").getAttribute("data-validity-valid") == null, "invalid editing validated untouched sibling");
+                page.click("button");
+                active(page.locator("form").getAttribute("data-validity-valid").equals("false"), "invalid form not reflected");
+                require(page.locator("[name=name]").getAttribute("data-validity-valid").equals("false"), "invalid control not reflected");
+                page.fill("[name=name]", "ok");
+                page.fill("[name=other]", "ok");
+                page.locator("[name=name]").dispatchEvent("change");
+                require(page.locator("form").getAttribute("data-validity-valid").equals("true"), "valid form not reflected");
+                require(!(Boolean) page.evaluate("() => {const f=document.querySelector('form');f.setAttribute('data-not-allowed','true');return f.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}"), "blocked submit escaped");
+                evidence.put("formId", page.locator("form").getAttribute("id"));
+            });
+        scenario(browser, engine, "stickynav uses its own position without a target and leaves hidden targets inactive", null,
+            context -> routeCheckPage(context, "sticky-baseline.html", checkPage(
+                "body{margin:0}main{height:5000px}",
+                "<section id='sn-target' hidden>Hidden</section><nav id='sn-hidden' data-paste-sticky-nav='#sn-target'>A</nav>" +
+                "<nav id='sn-missing' data-paste-sticky-nav='#missing'>B</nav><main>Content</main>",
                 STICKYNAV_SCRIPTS, null), null),
             (page, evidence) -> {
-                openCheckPage(page, "sticky-hidden-target.html");
-                frames(page);
-                page.evaluate("() => window.scrollTo(0, 5)");
-                frames(page);
-                page.evaluate("() => window.scrollTo(0, 6)");
-                frames(page);
-                evidence.put("stuckHiddenAt6", stuck(page));
-                require(!stuck(page), "a target hidden at this width read as stuck near the top of the page");
-                page.evaluate("() => window.scrollTo(0, 2000)");
-                frames(page);
-                require(!stuck(page), "a target hidden at this width read as stuck deep in the page");
-                page.evaluate("() => window.scrollTo(0, 6)");
-                frames(page);
-                page.setViewportSize(1000, 700);
-                frames(page);
-                frames(page);
-                require(!stuck(page), "the shown target stuck above its slot");
-                page.evaluate("() => window.scrollTo(0, 520)");
-                frames(page);
-                evidence.put("stuckShownAt520", stuck(page));
-                active(stuck(page), "the shown target did not stick past its slot");
-                page.evaluate("() => window.scrollTo(0, 480)");
-                frames(page);
-                require(!stuck(page), "the shown target stayed stuck above its slot");
+                openCheckPage(page, "sticky-baseline.html"); page.evaluate("() => scrollTo(0, 900)"); frames(page);
+                require((Boolean) page.evaluate("() => !document.getElementById('sn-hidden').classList.contains('paste-ui-sticky-active')"), "hidden target activated");
+                active((Boolean) page.evaluate("() => document.getElementById('sn-missing').classList.contains('paste-ui-sticky-active')"), "own threshold missing");
+                page.evaluate("() => {document.getElementById('sn-target').hidden=false; dispatchEvent(new Event('scroll'));}"); frames(page);
+                active((Boolean) page.evaluate("() => document.getElementById('sn-hidden').classList.contains('paste-ui-sticky-active')"), "revealed target did not activate");
+                evidence.put("revealed", true);
             });
-
-        // The stuck threshold names the in-flow slot after a resize while
-        // stuck, whatever moved meanwhile: fractional offsets summed over
-        // nested wrappers, an ancestor transform that settles or scales,
-        // a transformed inline svg above the target, or the only sibling
-        // above it hidden at the new width so the parent's content box
-        // anchors the slot. The stuck pass is checked on its own: without
-        // ResizeObserver, unsticking does not re-measure.
-        String snSlotStyle = "#_paste_ui_nav_wrap{height:50px;position:fixed;top:0;left:0;right:0;z-index:9;background:#333}" +
-            "#sn-above{height:100px}#sn-hero{height:600px;background:#88a}" +
-            ".sticky-nav-target{height:40px;background:#eee;display:block}" +
-            ".paste-fixed-subnav .sticky-nav-target{position:fixed;top:0;left:0;right:0}.sn-spacer{height:6000px}";
-        String snSlotTail = "<nav class=\"sticky-nav-target\" id=\"sn-t\"><a href=\"#sn-a\">A</a></nav>" +
-            "<div class=\"sn-spacer\" id=\"sn-a\">content</div>";
-        for (String[] snCase : new String[][]{
-                {"nested fractional wrappers",
-                    ".sn-r{position:relative;padding-top:0.45px;border-top:0.3px solid transparent}#sn-above{height:100.45px}#sn-hero{height:600.45px}",
-                    "<div class=\"sn-r\"><div class=\"sn-r\"><div class=\"sn-r\"><div class=\"sn-r\"><div class=\"sn-r\"><div class=\"sn-r\">" +
-                        "<div id=\"sn-hero\">hero</div>" + snSlotTail + "</div></div></div></div></div></div>",
-                    "document.getElementById('sn-above').style.height = '250.9px';" +
-                        " document.getElementById('sn-hero').style.height = '500.3px';" +
-                        " document.querySelectorAll('.sn-r').forEach(function (r) { r.style.paddingTop = '0.9px'; });"},
-                {"an ancestor translate that settles", "#sn-w{transform:translateY(80px)}",
-                    "<div id=\"sn-w\"><div id=\"sn-hero\">hero</div>" + snSlotTail + "</div>",
-                    "document.getElementById('sn-w').style.transform = 'none';" +
-                        " document.getElementById('sn-hero').style.height = '500px';"},
-                {"a scaled ancestor", "#sn-w{transform:scale(0.8);transform-origin:0 0}",
-                    "<div id=\"sn-w\"><div id=\"sn-hero\">hero</div>" + snSlotTail + "</div>",
-                    "document.getElementById('sn-above').style.height = '250px';" +
-                        " document.getElementById('sn-hero').style.height = '500px';"},
-                {"a translated inline svg above", "#sn-svg{display:block;transform:translateY(0)}",
-                    "<svg id=\"sn-svg\" width=\"300\" height=\"200\"></svg>" + snSlotTail,
-                    "document.getElementById('sn-above').style.height = '750px';" +
-                        " document.getElementById('sn-svg').style.transform = 'translateY(-120px)';"},
-                {"a bordered parent once the sibling above hides", "#sn-p{position:relative;border-top:13px solid;padding-top:9px}",
-                    "<div id=\"sn-p\"><div id=\"sn-hero\">hero</div>" + snSlotTail + "</div>",
-                    "document.getElementById('sn-hero').style.display = 'none';" +
-                        " document.getElementById('sn-above').style.height = '250px';"},
-                {"a table cell once the sibling above hides", "table{border:6px solid;border-spacing:5px}td{border:4px solid;padding:3px}",
-                    "<table><tr><td><div id=\"sn-hero\">hero</div>" + snSlotTail + "</td></tr></table>",
-                    "document.getElementById('sn-hero').style.display = 'none';" +
-                        " document.getElementById('sn-above').style.height = '250px';"}}) {
-            String snSlotPage = "sticky-slot-" + snCase[0].replaceAll("[^a-z]", "") + ".html";
-            scenario(browser, engine, "stickynav keeps the stuck threshold at the in-flow slot with " + snCase[0],
-                Map.of("viewport", new int[]{1200, 800}),
-                context -> routeCheckPage(context, snSlotPage, checkPage(snSlotStyle + snCase[1],
-                    "<script>window.ResizeObserver = undefined;</script>" +
-                    "<div id=\"_paste_ui_nav_wrap\">site nav</div><div id=\"sn-above\">above</div>" + snCase[2] +
-                    "<script>window.snMutate = function () { " + snCase[3] + " };</script>",
-                    STICKYNAV_SCRIPTS, null), null),
-                (page, evidence) -> {
-                    openCheckPage(page, snSlotPage);
-                    frames(page);
-                    page.evaluate("() => window.scrollTo(0, 100)");
-                    frames(page);
-                    require(!stuck(page), "the nav is stuck above its slot");
-                    page.evaluate("() => window.scrollTo(0, 3000)");
-                    frames(page);
-                    active(stuck(page), "the nav did not stick deep in the page");
-                    page.evaluate("() => window.snMutate()");
-                    page.setViewportSize(1100, 800);
-                    frames(page);
-                    frames(page);
-                    require(stuck(page), "the resize deep in the page unstuck the nav");
-                    // Back at the top the target is in flow: its rect is
-                    // the slot the stuck pass had to name.
-                    page.evaluate("() => window.scrollTo(0, 0)");
-                    frames(page);
-                    double slot = ((Number) page.evaluate("() => document.getElementById('sn-t').getBoundingClientRect().top" +
-                        " + window.scrollY - 50")).doubleValue();
-                    evidence.put("inFlowThreshold", slot);
-                    page.evaluate("y => window.scrollTo(0, y)", slot - 1.5);
-                    frames(page);
-                    evidence.put("stuckJustAbove", stuck(page));
-                    require(!stuck(page), "the stuck pass put the threshold above the in-flow slot " + slot);
-                    page.evaluate("y => window.scrollTo(0, y)", slot + 1.5);
-                    frames(page);
-                    evidence.put("stuckJustPast", stuck(page));
-                    require(stuck(page), "the stuck pass put the threshold below the in-flow slot " + slot);
-                });
-        }
-
-        // A target shown after load (a class removed, a tab panel shown)
-        // and content inserted above the target after load move the slot
-        // with no resize: the nav sticks at the slot as it is now.
-        for (String[] snLate : new String[][]{
-                {"a target revealed after load", "#sn-t.sn-off{display:none}",
-                    "<div id=\"sn-hero\">hero</div><nav class=\"sticky-nav-target sn-off\" id=\"sn-t\"><a href=\"#sn-a\">A</a></nav>",
-                    "document.getElementById('sn-t').classList.remove('sn-off');"},
-                {"a tab panel shown after load", "#sn-panel{display:none}#sn-panel.sn-on{display:block}",
-                    "<div id=\"sn-hero\">hero</div><div id=\"sn-panel\"><div style=\"height:30px\">intro</div>" +
-                        "<nav class=\"sticky-nav-target\" id=\"sn-t\"><a href=\"#sn-a\">A</a></nav></div>",
-                    "document.getElementById('sn-panel').classList.add('sn-on');"},
-                {"content inserted above the target after load", "",
-                    "<div id=\"sn-hero\">hero</div>" + snSlotTail,
-                    "var d = document.createElement('div'); d.style.height = '200px';" +
-                        " document.getElementById('sn-t').parentNode.insertBefore(d, document.getElementById('sn-t'));"},
-                {"a display: contents target", ".sticky-nav-target{display:contents}.sticky-nav-target>div{display:block;height:40px}" +
-                        ".paste-fixed-subnav .sticky-nav-target>div{position:fixed;top:0;left:0;right:0}",
-                    "<div id=\"sn-hero\">hero</div><nav class=\"sticky-nav-target\" id=\"sn-t\"><div id=\"sn-tc\">A</div></nav>", ""}}) {
-            String snLatePage = "sticky-late-" + snLate[0].replaceAll("[^a-z]", "") + ".html";
-            scenario(browser, engine, "stickynav sticks at the current slot of " + snLate[0],
-                Map.of("viewport", new int[]{1200, 800}),
-                context -> routeCheckPage(context, snLatePage, checkPage(snSlotStyle + snLate[1],
-                    "<div id=\"_paste_ui_nav_wrap\">site nav</div><div id=\"sn-above\">above</div>" + snLate[2] +
-                    "<div class=\"sn-spacer\" id=\"sn-a\">content</div>" +
-                    "<script>window.snLate = function () { " + snLate[3] + " };</script>",
-                    STICKYNAV_SCRIPTS, null), null),
-                (page, evidence) -> {
-                    openCheckPage(page, snLatePage);
-                    frames(page);
-                    page.evaluate("() => window.scrollTo(0, 100)");
-                    frames(page);
-                    page.evaluate("() => window.scrollTo(0, 0)");
-                    frames(page);
-                    page.evaluate("() => window.snLate()");
-                    frames(page);
-                    frames(page);
-                    double slot = ((Number) page.evaluate("() => { var t = document.getElementById('sn-t');" +
-                        " var c = document.getElementById('sn-tc'); return (c || t).getBoundingClientRect().top + window.scrollY - 50; }"))
-                        .doubleValue();
-                    evidence.put("threshold", slot);
-                    active(slot > 600, "the slot is not below the hero: " + slot);
-                    page.evaluate("y => window.scrollTo(0, y)", slot - 20);
-                    frames(page);
-                    evidence.put("stuckAbove", stuck(page));
-                    require(!stuck(page), "the nav stuck above its slot " + slot);
-                    page.evaluate("y => window.scrollTo(0, y)", slot + 20);
-                    frames(page);
-                    evidence.put("stuckPast", stuck(page));
-                    require(stuck(page), "the nav did not stick past its slot " + slot);
-                });
-        }
 
         // Content that grows before the click leaves the landing to the
-        // browser and the target's CSS scroll-margin; the module measures
-        // nothing and moves focus only once the navigation has landed.
+        // browser and the target's CSS scroll-margin and authored tabindex.
         // There is no promise to chase a target moving during animation.
-        scenario(browser, engine, "smoothscroll leaves a grown page's landing to CSS scroll-margin and focuses after the navigation", null,
-            context -> routeCheckPage(context, "smoothscroll-shift.html", checkPage(
+        scenario(browser, engine, "native fragment leaves a grown page's landing to CSS scroll-margin and focuses after the navigation", null,
+            context -> routeCheckPage(context, "native-scroll-shift.html", checkPage(
                 "html{scroll-behavior:auto}.paste-ui-section-nav{position:fixed;top:0;height:48px}" +
                 "section{height:1000px;scroll-margin-top:96px}",
                 "<nav class=\"paste-ui-section-nav\"><a id=\"ss-go\" href=\"#ss-s4\">to s4</a></nav>" +
                 "<section id=\"ss-s1\">s1</section><div id=\"ss-slot\"></div>" +
-                "<section id=\"ss-s4\">s4</section><section>s5</section>",
-                SMOOTHSCROLL_SCRIPTS, null), null),
+                "<section tabindex=\"-1\" id=\"ss-s4\">s4</section><section>s5</section>",
+                new String[0], null), null),
             (page, evidence) -> {
-                openCheckPage(page, "smoothscroll-shift.html");
+                openCheckPage(page, "native-scroll-shift.html");
                 page.evaluate("() => { const target = document.getElementById('ss-s4'); window.ssArrival = null;" +
                     " target.addEventListener('focus', () => { ssArrival = {hash: location.hash, target: target.matches(':target')}; }, {once: true});" +
                     " document.getElementById('ss-slot').style.height = '300px'; document.getElementById('ss-go').click(); }");
@@ -1769,30 +1712,6 @@ public final class ElementsBrowserChecks {
 
         // A multistatepop listener that changes the selection while it is
         // announced: the top history entry describes the final selection.
-        scenario(browser, engine, "multistate history matches the final selection after a nested listener change", null,
-            context -> routeCheckPage(context, "multistate-nested.html", multistatePage("",
-                "paste.require(['paste.ui.multistate'], function (module, multistate) {" +
-                " multistate.events.multistatepop.subscribe(function () {" +
-                "  var state = multistate.getCurrentState();" +
-                "  if (state.area1 === 'b' && state.area2 === 'b') { document.getElementById('ms-a2a').click(); }" +
-                " });" +
-                " window.multistateListening = true; });"), null),
-            (page, evidence) -> {
-                openCheckPage(page, "multistate-nested.html");
-                page.waitForFunction("() => window.multistateListening === true");
-                page.click("#ms-a1b");
-                page.waitForTimeout(200);
-                Map<?, ?> selection = multistateSelection(page);
-                evidence.put("selection", selection);
-                active("b".equals(selection.get("area1")) && "a".equals(selection.get("area2")),
-                    "the nested change did not apply: " + selection);
-                String hash = String.valueOf(selection.get("hash"));
-                require(hash.contains("area1:b") && hash.contains("area2:a") && !hash.contains("area2:b"),
-                    "the top history entry describes a superseded selection: " + hash);
-            });
-
-        // <a href="#"> is an in-page link, not Back to the first entry:
-        // the chosen tab stays chosen.
         scenario(browser, engine, "multistate keeps the selected tab across an href=\"#\" link", null,
             context -> routeCheckPage(context, "multistate-top.html",
                 multistatePage("<p style=\"height:2000px\"><a id=\"ms-top\" href=\"#\">Back to top</a></p>", null), null),
@@ -1811,283 +1730,10 @@ public final class ElementsBrowserChecks {
                     ".hasAttribute('data-multistate-state')"), "the chosen panel lost its reflected state");
             });
 
-        // Unnamed radios of one key are grouped into strips by their
-        // markup: a stray radio, strips that differ in values, a flat
-        // pair of strips and a key whose text ends like a strip number
-        // each keep a native group of their own, while authored names
-        // and form submission stay as authored.
-        java.util.function.Function<String[], String> msStripRadio = spec ->
-            "<input id=\"" + spec[0] + "\" type=\"radio\" data-multistate-key=\"" + spec[1] + "\" value=\"" + spec[2] + "\"" +
-            (spec.length > 3 ? " " + spec[3] : "") + "><label for=\"" + spec[0] + "\">" + spec[2] + "</label>";
-        String msStripPanels = "<div data-multistate-key=\"tab\" data-multistate-value=\"overview\">overview panel</div>" +
-            "<div data-multistate-key=\"tab\" data-multistate-value=\"specs\">specs panel</div>" +
-            "<div data-multistate-key=\"tab\" data-multistate-value=\"gallery\">gallery panel</div>" +
-            "<div data-multistate-key=\"a\" data-multistate-value=\"x\">a x</div>" +
-            "<div data-multistate-key=\"a\" data-multistate-value=\"y\">a y</div>" +
-            "<div data-multistate-key=\"a:1\" data-multistate-value=\"p\">a:1 p</div>" +
-            "<div data-multistate-key=\"a:1\" data-multistate-value=\"q\">a:1 q</div>" +
-            "<div data-multistate-key=\"size\" data-multistate-value=\"s\">size s</div>" +
-            "<div data-multistate-key=\"size\" data-multistate-value=\"m\">size m</div>";
-        String msStripBody = "<button id=\"ms-before\">before</button>" +
-            msStripRadio.apply(new String[] {"ms-stray", "tab", "overview"}) +
-            "<div id=\"ms-strip-a\">" + msStripRadio.apply(new String[] {"ms-a1", "tab", "overview", "checked"}) +
-            msStripRadio.apply(new String[] {"ms-a2", "tab", "specs"}) + "</div>" +
-            "<div id=\"ms-strip-b\">" + msStripRadio.apply(new String[] {"ms-b1", "tab", "overview"}) +
-            msStripRadio.apply(new String[] {"ms-b2", "tab", "specs"}) +
-            msStripRadio.apply(new String[] {"ms-b3", "tab", "gallery"}) + "</div>" +
-            "<div id=\"ms-strip-c\" role=\"tablist\">" + msStripRadio.apply(new String[] {"ms-c1", "tab", "overview"}) +
-            msStripRadio.apply(new String[] {"ms-c2", "tab", "specs"}) + "</div>" +
-            "<div id=\"ms-flat\">" + msStripRadio.apply(new String[] {"ms-s1x", "a", "x", "checked"}) +
-            msStripRadio.apply(new String[] {"ms-s1y", "a", "y"}) +
-            msStripRadio.apply(new String[] {"ms-s2x", "a", "x"}) +
-            msStripRadio.apply(new String[] {"ms-s2y", "a", "y"}) +
-            msStripRadio.apply(new String[] {"ms-kp", "a:1", "p", "checked"}) +
-            msStripRadio.apply(new String[] {"ms-kq", "a:1", "q"}) + "</div>" +
-            "<form id=\"ms-form\" action=\"#\"><fieldset>" +
-            msStripRadio.apply(new String[] {"ms-size-s", "size", "s", "name=\"size\" checked"}) +
-            msStripRadio.apply(new String[] {"ms-size-m", "size", "m", "name=\"size\""}) + "</fieldset></form>" +
-            msStripPanels + "<button id=\"ms-after\">after</button>";
-        String msStripChecked = "() => Array.from(document.querySelectorAll('input[type=radio]:checked'), r => r.id).sort().join(' ')";
-        scenario(browser, engine, "multistate groups unnamed radios into strips by markup", null,
-            context -> routeCheckPage(context, "multistate-strips.html",
-                checkPage("[data-multistate-value]{display:none}[data-multistate-state]{display:block}",
-                    msStripBody, MULTISTATE_SCRIPTS, null), null),
-            (page, evidence) -> {
-                openCheckPage(page, "multistate-strips.html");
-                active((Boolean) page.evaluate("() => document.querySelector('[data-multistate-key=tab]" +
-                    "[data-multistate-value=overview]').hasAttribute('data-multistate-state')"),
-                    "the module did not reflect the authored default");
-                @SuppressWarnings("unchecked")
-                List<String> groups = (List<String>) page.evaluate("() => { const by = {};" +
-                    " document.querySelectorAll('input[type=radio]').forEach(r => (by[r.name] = by[r.name] || []).push(r.id));" +
-                    " return Object.values(by).map(g => g.join(' ')).sort(); }");
-                @SuppressWarnings("unchecked")
-                List<String> names = (List<String>) page.evaluate(
-                    "() => Array.from(document.querySelectorAll('input[type=radio]'), r => r.id + '=' + r.name)");
-                evidence.put("groups", groups);
-                evidence.put("names", names);
-                require(groups.equals(List.of("ms-a1 ms-a2", "ms-b1 ms-b2 ms-b3", "ms-c1 ms-c2", "ms-kp ms-kq",
-                        "ms-s1x ms-s1y", "ms-s2x ms-s2y", "ms-size-s ms-size-m", "ms-stray")),
-                    "the native radio groups do not follow the strips: " + names);
-                require(names.contains("ms-size-s=size") && names.contains("ms-size-m=size"),
-                    "an authored name was rewritten: " + names);
-
-                // ArrowRight inside the strip that has the extra value
-                // reaches it, and wraps within that strip.
-                page.click("#ms-b2");
-                page.focus("#ms-b2");
-                page.keyboard().press("ArrowRight");
-                page.waitForTimeout(100);
-                String afterGallery = String.valueOf(page.evaluate(msStripChecked));
-                evidence.put("arrowToGallery", afterGallery + " " + page.evaluate("() => location.hash"));
-                require("ms-b3".equals(page.evaluate("() => document.activeElement.id")) &&
-                        String.valueOf(page.evaluate("() => location.hash")).contains("tab:gallery"),
-                    "ArrowRight in the longer strip did not reach its extra value: " + afterGallery);
-                require(!afterGallery.contains("ms-a") && !afterGallery.contains("ms-c") && !afterGallery.contains("ms-stray"),
-                    "a strip without the value kept a radio checked: " + afterGallery);
-
-                // Tab with a value only one strip offers still stops in
-                // every strip: on the checked radio where a strip has
-                // one, and on the strip's radios where it has none (one
-                // or each, as the engine treats an unchecked group).
-                // WebKit's default Tab skips buttons and radios; Option+Tab
-                // walks every control, as full keyboard access does.
-                String msStripTab = "webkit".equals(engine) ? "Alt+Tab" : "Tab";
-                page.focus("#ms-before");
-                List<String> stops = new ArrayList<>();
-                for (int press = 0; press < 12; press += 1) {
-                    page.keyboard().press(msStripTab);
-                    String focused = String.valueOf(page.evaluate("() => document.activeElement.id"));
-                    if ("ms-after".equals(focused)) break;
-                    stops.add(focused);
-                }
-                evidence.put("tabStops", stops);
-                List<String> strippedStops = new ArrayList<>(stops);
-                strippedStops.removeAll(List.of("ms-a2", "ms-c2"));
-                require(strippedStops.equals(List.of("ms-stray", "ms-a1", "ms-b3", "ms-c1", "ms-s1x", "ms-s2x", "ms-kp", "ms-size-s")),
-                    "Tab did not stop in every strip, or left a checked radio for another: " + stops);
-
-                // Back from the extra value along its own strip (WebKit
-                // does not wrap a radio group, so the walk goes left).
-                page.focus("#ms-b3");
-                page.keyboard().press("ArrowLeft");
-                page.keyboard().press("ArrowLeft");
-                page.waitForTimeout(100);
-                String overview = String.valueOf(page.evaluate(msStripChecked));
-                evidence.put("arrowBackToOverview", overview);
-                require("ms-b1".equals(page.evaluate("() => document.activeElement.id")) &&
-                        overview.contains("ms-a1") && overview.contains("ms-c1") && overview.contains("ms-stray"),
-                    "ArrowLeft from the extra value left its strip or did not select overview everywhere: " + overview);
-
-                // The shorter strip's arrows stay inside it.
-                page.focus("#ms-a1");
-                page.keyboard().press("ArrowRight");
-                page.waitForTimeout(100);
-                String specs = String.valueOf(page.evaluate(msStripChecked));
-                evidence.put("arrowInShortStrip", specs);
-                require("ms-a2".equals(page.evaluate("() => document.activeElement.id")) &&
-                        specs.contains("ms-b2") && specs.contains("ms-c2"),
-                    "ArrowRight in the shorter strip left it or did not select specs everywhere: " + specs);
-
-                // Key 'a' strip 1 and key 'a:1' are separate groups.
-                page.click("#ms-s2y");
-                page.waitForTimeout(100);
-                String colon = String.valueOf(page.evaluate(msStripChecked));
-                evidence.put("colonKeys", colon);
-                require(colon.contains("ms-kp") && colon.contains("ms-s1y") && colon.contains("ms-s2y"),
-                    "choosing key a unchecked key a:1 or a mirrored strip: " + colon);
-                require(String.valueOf(page.evaluate("() => location.hash")).contains("a%3A1:p"),
-                    "key a:1 left the fragment: " + page.evaluate("() => location.hash"));
-
-                // Hash round-trip.
-                String beforeHash = String.valueOf(page.evaluate(msStripChecked));
-                page.evaluate("() => { location.hash = '#tab:gallery,a:x,a%3A1:q,size:m'; }");
-                page.waitForTimeout(200);
-                String hashed = String.valueOf(page.evaluate(msStripChecked));
-                evidence.put("hashApplied", hashed);
-                require(hashed.equals("ms-b3 ms-kq ms-s1x ms-s2x ms-size-m"),
-                    "the fragment did not check exactly its triggers: " + hashed);
-                page.evaluate("() => history.back()");
-                page.waitForTimeout(300);
-                String back = String.valueOf(page.evaluate(msStripChecked));
-                evidence.put("hashBack", back);
-                require(back.equals(beforeHash), "Back did not restore the selection: " + beforeHash + " -> " + back);
-
-                // Form submission keeps the authored name.
-                page.click("#ms-size-m");
-                page.waitForTimeout(100);
-                Object submitted = page.evaluate("() => Array.from(new FormData(document.getElementById('ms-form'))," +
-                    " e => e[0] + '=' + e[1]).join('&')");
-                evidence.put("formData", submitted);
-                require("size=m".equals(submitted), "the form submits other than its authored name: " + submitted);
-            });
-
-        // Interleaved strips: a table with a strip per column, list items
-        // holding one radio of each strip, a grid filled row by row. Each
-        // column keeps one native group, next to strips that differ in
-        // values row by row, and a key with a space keeps its own text in
-        // the generated name.
-        java.util.function.Function<String[], String> msWeaveRadio = spec ->
-            "<input id=\"" + spec[0] + "\" type=\"radio\" data-multistate-key=\"" + spec[1] + "\" value=\"" + spec[2] + "\"" +
-            (spec.length > 3 ? " " + spec[3] : "") + "><label for=\"" + spec[0] + "\">" + spec[0] + "</label>";
-        StringBuilder msWeaveBody = new StringBuilder("<button id=\"msw-before\">before</button><table><tbody>");
-        String[] msWeaveValues = {"o", "s", "g"};
-        for (int row = 0; row < 3; row += 1) {
-            String v = msWeaveValues[row];
-            msWeaveBody.append("<tr><td>").append(msWeaveRadio.apply(new String[] {"msw-ca" + row, "cols", v, row == 0 ? "checked" : ""}))
-                .append("</td><td>").append(msWeaveRadio.apply(new String[] {"msw-cb" + row, "cols", v})).append("</td></tr>");
-        }
-        msWeaveBody.append("</tbody></table><div>");
-        for (int row = 0; row < 3; row += 1) {
-            String v = msWeaveValues[row];
-            msWeaveBody.append("<div>").append(msWeaveRadio.apply(new String[] {"msw-ia" + row, "items", v, row == 0 ? "checked" : ""}))
-                .append(msWeaveRadio.apply(new String[] {"msw-ib" + row, "items", v})).append("</div>");
-        }
-        msWeaveBody.append("</div><div style=\"display:grid;grid-template-columns:1fr 1fr\">");
-        for (int row = 0; row < 3; row += 1) {
-            String v = msWeaveValues[row];
-            msWeaveBody.append("<div>").append(msWeaveRadio.apply(new String[] {"msw-ga" + row, "grid", v, row == 0 ? "checked" : ""}))
-                .append("</div><div>").append(msWeaveRadio.apply(new String[] {"msw-gb" + row, "grid", v})).append("</div>");
-        }
-        msWeaveBody.append("</div><table><tbody><tr>")
-            .append("<td>").append(msWeaveRadio.apply(new String[] {"msw-ra0", "rows", "o", "checked"})).append("</td>")
-            .append("<td>").append(msWeaveRadio.apply(new String[] {"msw-ra1", "rows", "s"})).append("</td></tr><tr>")
-            .append("<td>").append(msWeaveRadio.apply(new String[] {"msw-rb0", "rows", "o"})).append("</td>")
-            .append("<td>").append(msWeaveRadio.apply(new String[] {"msw-rb1", "rows", "s"})).append("</td>")
-            .append("<td>").append(msWeaveRadio.apply(new String[] {"msw-rb2", "rows", "g"})).append("</td></tr></tbody></table>")
-            .append("<div>").append(msWeaveRadio.apply(new String[] {"msw-na0", "north america", "o", "checked"}))
-            .append(msWeaveRadio.apply(new String[] {"msw-na1", "north america", "s"})).append("</div>");
-        for (String key : new String[] {"cols", "items", "grid", "rows", "north america"}) {
-            for (String v : msWeaveValues) {
-                msWeaveBody.append("<div data-multistate-key=\"").append(key).append("\" data-multistate-value=\"").append(v)
-                    .append("\">").append(key).append(' ').append(v).append("</div>");
-            }
-        }
-        msWeaveBody.append("<button id=\"msw-after\">after</button>");
-        scenario(browser, engine, "multistate keeps interleaved strips in one group per column", null,
-            context -> routeCheckPage(context, "multistate-interleaved.html",
-                checkPage("[data-multistate-value]{display:none}[data-multistate-state]{display:block}",
-                    msWeaveBody.toString(), MULTISTATE_SCRIPTS, null), null),
-            (page, evidence) -> {
-                openCheckPage(page, "multistate-interleaved.html");
-                active((Boolean) page.evaluate("() => document.querySelector('[data-multistate-key=cols]" +
-                    "[data-multistate-value=o]').hasAttribute('data-multistate-state')"),
-                    "the module did not reflect the authored default");
-                @SuppressWarnings("unchecked")
-                List<String> groups = (List<String>) page.evaluate("() => { const by = {};" +
-                    " document.querySelectorAll('input[type=radio]').forEach(r => (by[r.name] = by[r.name] || []).push(r.id));" +
-                    " return Object.values(by).map(g => g.join(' ')).sort(); }");
-                @SuppressWarnings("unchecked")
-                List<String> names = (List<String>) page.evaluate(
-                    "() => Array.from(document.querySelectorAll('input[type=radio]'), r => r.id + '=' + r.name)");
-                evidence.put("groups", groups);
-                evidence.put("names", names);
-                require(groups.equals(List.of("msw-ca0 msw-ca1 msw-ca2", "msw-cb0 msw-cb1 msw-cb2",
-                        "msw-ga0 msw-ga1 msw-ga2", "msw-gb0 msw-gb1 msw-gb2", "msw-ia0 msw-ia1 msw-ia2",
-                        "msw-ib0 msw-ib1 msw-ib2", "msw-na0 msw-na1",
-                        "msw-ra0 msw-ra1", "msw-rb0 msw-rb1 msw-rb2")),
-                    "the native radio groups do not follow the strips: " + names);
-                require(names.contains("msw-na0=paste-ui-multistate:north america"),
-                    "a key with a space lost its own text in the generated name: " + names);
-
-                // ArrowDown in a column walks the column and every
-                // mirrored strip follows.
-                String msWeaveChecked = "() => Array.from(document.querySelectorAll('input[data-multistate-key=cols]:checked')," +
-                    " r => r.id).sort().join(' ')";
-                page.focus("#msw-ca0");
-                page.keyboard().press("ArrowDown");
-                page.waitForTimeout(100);
-                Object focused = page.evaluate("() => document.activeElement.id");
-                Object columns = page.evaluate(msWeaveChecked);
-                evidence.put("arrowInColumn", focused + " " + columns);
-                require("msw-ca1".equals(focused) && "msw-ca1 msw-cb1".equals(columns),
-                    "ArrowDown in a column left it or did not select the next value everywhere: " + focused + " " + columns);
-            });
-
-        // A key holding a lone surrogate (which encodeURIComponent
-        // refuses) binds and selects like any other, and the page's other
-        // keys keep working. Page text cannot carry a lone surrogate; the
-        // attribute is set before the module binds.
-        scenario(browser, engine, "multistate binds a key holding a lone surrogate", null,
-            context -> routeCheckPage(context, "multistate-lone-surrogate.html", multistatePage(
-                "<input id=\"msl-a\" type=\"radio\" data-multistate-key=\"lone\" value=\"a\" checked><label for=\"msl-a\">a</label>" +
-                "<input id=\"msl-b\" type=\"radio\" data-multistate-key=\"lone\" value=\"b\"><label for=\"msl-b\">b</label>" +
-                "<div data-multistate-key=\"lone\" data-multistate-value=\"a\">lone a</div>" +
-                "<div data-multistate-key=\"lone\" data-multistate-value=\"b\">lone b</div>" +
-                "<script>document.querySelectorAll('[data-multistate-key=lone]').forEach(function (e) {" +
-                " e.setAttribute('data-multistate-key', 'k:\\uD800'); });</script>", null), null),
-            (page, evidence) -> {
-                openCheckPage(page, "multistate-lone-surrogate.html");
-                active((Boolean) page.evaluate("() => document.querySelector('[data-multistate-key=area1]" +
-                    "[data-multistate-value=a]').hasAttribute('data-multistate-state')"),
-                    "the module did not reflect the authored default of the page's other keys");
-                page.click("#msl-b");
-                page.waitForTimeout(100);
-                Object lone = page.evaluate("() => Array.from(document.querySelectorAll('[data-multistate-state]')," +
-                    " e => e.textContent).filter(t => t.startsWith('lone')).join(',')");
-                evidence.put("loneSelection", lone);
-                evidence.put("names", page.evaluate("() => document.getElementById('msl-a').name"));
-                require("lone b".equals(lone), "the key holding a lone surrogate did not select: " + lone);
-                page.click("#ms-a1b");
-                page.waitForTimeout(100);
-                // The fragment carries the escaped token, which does not
-                // decode: read it raw.
-                Object hash = page.evaluate("() => location.hash");
-                Object area1 = page.evaluate("() => document.querySelector('[data-multistate-key=area1]" +
-                    "[data-multistate-state]')?.textContent ?? null");
-                evidence.put("hash", hash);
-                evidence.put("area1", area1);
-                require("area 1 panel b".equals(area1) && String.valueOf(hash).contains("area1:b"),
-                    "another key stopped working beside the lone-surrogate key: " + area1 + " " + hash);
-            });
-
-        // Naming is linear in the radios: a thousand-radio strip re-scans
-        // in a few milliseconds, not the seconds a pairwise comparison of
-        // every radio with every other costs.
-        scenario(browser, engine, "multistate names a thousand-radio strip without comparing every pair", null,
+        scenario(browser, engine, "multistate rescans a thousand named radios without renaming them", null,
             context -> routeCheckPage(context, "multistate-long-strip.html",
                 checkPage("", "<div id=\"msl\"></div><script>(function () { var h = '<section><ul>', v;" +
-                    " for (v = 0; v < 1000; v += 1) { h += '<li><label><input type=radio data-multistate-key=k value=v' + v +" +
+                    " for (v = 0; v < 1000; v += 1) { h += '<li><label><input type=radio name=large-group data-multistate-key=k value=v' + v +" +
                     " (v ? '' : ' checked') + '>v' + v + '</label></li>'; }" +
                     " h += '</ul></section>'; for (v = 0; v < 1000; v += 1) {" +
                     " h += '<div data-multistate-key=k data-multistate-value=v' + v + '></div>'; }" +
@@ -2100,16 +1746,14 @@ public final class ElementsBrowserChecks {
                 page.waitForFunction("() => typeof window.multistateRescanMs === 'number'");
                 Object groups = page.evaluate("() => new Set(Array.from(document.querySelectorAll('input'), r => r.name)).size");
                 active(Integer.valueOf(1).equals(groups) &&
-                        (Boolean) page.evaluate("() => document.querySelector('input').name === 'paste-ui-multistate:k'"),
-                    "the strip was not named as one group: " + groups);
+                        (Boolean) page.evaluate("() => document.querySelector('input').name === 'large-group'"),
+                    "the authored radio group was changed: " + groups);
                 double rescan = ((Number) page.evaluate("() => window.multistateRescanMs")).doubleValue();
                 evidence.put("rescanMs", rescan);
                 require(rescan < 150, "re-scanning a thousand-radio strip took " + rescan + " ms");
             });
 
-        // Measuring a collapsed field clamps its scroller for an instant;
-        // under scroll-behavior: smooth the restore must still be a jump,
-        // so no frame ever paints the clamped offset.
+        // Grow-only sizing never collapses a field or clamps its scroller.
         scenario(browser, engine, "autogrow keeps a smooth scroller's offset with no glide", null,
             context -> routeCheckPage(context, "autogrow-smooth.html", checkPage(
                 "#ag-box{height:300px;overflow:auto;scroll-behavior:smooth;border:1px solid #000}" +
@@ -2145,147 +1789,44 @@ public final class ElementsBrowserChecks {
                 require(lowest >= settled - 1, "a frame painted the clamped offset " + lowest + " instead of " + settled);
             });
 
-        // A height transition must not reach the measure: a collapse that
-        // animates leaves scrollHeight at the old height and the field never
-        // shrinks. The field styled shorter than its rows keeps its authored
-        // floor, nothing the pass writes starts a height transition, and an
-        // author's own inline transition comes back as written.
-        scenario(browser, engine, "autogrow shrinks a field with a height transition and keeps a short rows floor", null,
-            context -> routeCheckPage(context, "autogrow-transition.html", checkPage(
-                ".tr{display:block;box-sizing:border-box;width:300px;padding:4px;margin:4px 0;min-height:80px;max-height:4000px;" +
-                "overflow-y:auto;font:16px/20px sans-serif}" +
-                "#tr-height{transition:height .2s}" +
-                "#tr-all{transition:all .15s}" +
-                // The mixin's own block with $transition passed.
-                "[data-paste-autogrow].tr-mixin{min-height:80px;max-height:4000px;overflow-y:auto;transition:height .3s ease-out}" +
-                "#tr-important{transition:height .25s !important}" +
-                "#tr-delay{transition:height 0s .3s}" +
-                "#tr-rows,#tr-rows-timed{height:100px}#tr-rows-timed{transition:height .2s}",
-                "<textarea class=\"tr\" id=\"tr-height\" data-paste-autogrow rows=\"2\"></textarea>" +
-                "<textarea class=\"tr\" id=\"tr-all\" data-paste-autogrow rows=\"2\"></textarea>" +
-                "<textarea class=\"tr tr-mixin\" id=\"tr-mixin\" data-paste-autogrow rows=\"2\"></textarea>" +
-                "<textarea class=\"tr\" id=\"tr-important\" data-paste-autogrow rows=\"2\"></textarea>" +
-                "<textarea class=\"tr\" id=\"tr-delay\" data-paste-autogrow rows=\"2\"></textarea>" +
-                "<textarea class=\"tr\" id=\"tr-inline\" data-paste-autogrow rows=\"2\" style=\"transition-duration:.2s;transition-property:height\"></textarea>" +
-                "<textarea class=\"tr\" id=\"tr-none\" data-paste-autogrow rows=\"2\"></textarea>" +
-                "<textarea class=\"tr\" id=\"tr-rows\" data-paste-autogrow rows=\"12\"></textarea>" +
-                "<textarea class=\"tr\" id=\"tr-rows-timed\" data-paste-autogrow rows=\"12\"></textarea>",
+        scenario(browser, engine, "autogrow grows without shrinking or overriding authored transitions and caps", null,
+            context -> routeCheckPage(context, "autogrow-contract.html", checkPage(
+                "textarea{display:block;width:280px;height:60px;padding:8px;border:2px solid;max-height:300px;font:16px/20px sans-serif}" +
+                "#ag-border{box-sizing:border-box}#ag-transition{transition:height .15s linear}",
+                "<textarea id='ag-content' data-paste-autogrow></textarea><textarea id='ag-border' data-paste-autogrow></textarea>" +
+                "<textarea id='ag-transition' data-paste-autogrow style='height:60px!important'></textarea>" +
+                "<textarea id='ag-hidden' data-paste-autogrow hidden style='display:none'></textarea>",
                 AUTOGROW_SCRIPTS, null), null),
             (page, evidence) -> {
-                openCheckPage(page, "autogrow-transition.html");
-                @SuppressWarnings("unchecked")
-                Map<String, Object> run = (Map<String, Object>) page.evaluate("async () => {" +
-                    " const fields = Array.from(document.querySelectorAll('textarea.tr'));" +
-                    " const frame = () => new Promise(r => requestAnimationFrame(r));" +
-                    " const box = () => Object.fromEntries(fields.map(f => [f.id, Math.round(f.getBoundingClientRect().height)]));" +
-                    " const typed = async value => { fields.forEach(f => { f.value = value; });" +
-                    "  fields.forEach(f => f.dispatchEvent(new Event('input', {bubbles: true})));" +
-                    "  const animated = []; let n = 12;" +
-                    "  while (n--) { await frame(); fields.forEach(f => { if (animated.indexOf(f.id) < 0 &&" +
-                    "   f.getAnimations().some(a => a.transitionProperty === 'height')) animated.push(f.id); }); }" +
-                    "  await new Promise(r => setTimeout(r, 700)); return {box: box(), animated}; };" +
-                    " await new Promise(r => setTimeout(r, 400));" +
-                    " const authored = box();" +
-                    " const grown = await typed(Array.from({length: 20}, (v, i) => 'line ' + i).join('\\n'));" +
-                    " const shrunk = await typed('x');" +
-                    " const inline = Object.fromEntries(fields.map(f => [f.id, [f.style.getPropertyValue('transition-duration')," +
-                    "  f.style.getPropertyPriority('transition-duration'), f.style.getPropertyValue('transition-delay')]]));" +
-                    " return {authored, grown, shrunk, inline}; }");
-                evidence.putAll(run);
-                Map<?, ?> authored = (Map<?, ?>) run.get("authored");
-                Map<?, ?> grown = (Map<?, ?>) ((Map<?, ?>) run.get("grown")).get("box");
-                Map<?, ?> shrunk = (Map<?, ?>) ((Map<?, ?>) run.get("shrunk")).get("box");
-                Map<?, ?> inline = (Map<?, ?>) run.get("inline");
-                for (Object id : authored.keySet()) {
-                    int floor = ((Number) authored.get(id)).intValue();
-                    int tall = ((Number) grown.get(id)).intValue();
-                    int after = ((Number) shrunk.get(id)).intValue();
-                    active(tall > 300, id + " did not grow with its content: " + floor + " -> " + tall);
-                    require(after == floor, id + " did not shrink back to its authored " + floor + "px: " + tall + " -> " + after);
-                }
-                require(((Number) authored.get("tr-rows")).intValue() == 100,
-                    "the rows field did not author at 100px: " + authored);
-                require(((List<?>) ((Map<?, ?>) run.get("grown")).get("animated")).isEmpty() &&
-                    ((List<?>) ((Map<?, ?>) run.get("shrunk")).get("animated")).isEmpty(),
-                    "a sizing pass started a height transition: " + run);
-                require(List.of("0.2s", "", "").equals(inline.get("tr-inline")),
-                    "the author's inline transition was not put back as written: " + inline.get("tr-inline"));
-                for (Object id : inline.keySet()) {
-                    if (!"tr-inline".equals(id)) {
-                        require(List.of("", "", "").equals(inline.get(id)), id + " kept an inline transition: " + inline.get(id));
+                openCheckPage(page, "autogrow-contract.html");
+                Map<?, ?> result = (Map<?, ?>) page.evaluate("""
+                    async () => {
+                        const out = {};
+                        for (const id of ['ag-content','ag-border','ag-transition']) {
+                            const f = document.getElementById(id), before = f.offsetHeight;
+                            f.value = Array(12).fill('line').join('\\n');
+                            f.dispatchEvent(new Event('input', {bubbles:true}));
+                            const target = f.style.height;
+                            f.value = 'short'; f.dispatchEvent(new Event('input', {bubbles:true}));
+                            if (f.style.height !== target) throw Error('deletion shrank '+id);
+                            await new Promise(r => setTimeout(r, 220));
+                            if (f.offsetHeight <= before) throw Error('no growth '+id);
+                            if (id === 'ag-transition' && (getComputedStyle(f).transitionDuration !== '0.15s' || f.style.getPropertyPriority('height') !== 'important')) throw Error('authored style lost');
+                            f.value = Array(60).fill('line').join('\\n'); f.dispatchEvent(new Event('input', {bubbles:true}));
+                            await new Promise(r => setTimeout(r, 220));
+                            if (parseFloat(getComputedStyle(f).height) > 300.1) throw Error('max-height lost');
+                            out[id] = {before, target, capped:f.offsetHeight};
+                        }
+                        const hidden = document.getElementById('ag-hidden');
+                        if (hidden.style.height) throw Error('hidden field sized');
+                        hidden.hidden=false; hidden.style.display='block'; hidden.value=Array(12).fill('line').join('\\n');
+                        hidden.dispatchEvent(new Event('input', {bubbles:true}));
+                        if (hidden.offsetHeight <= 100) throw Error('revealed field did not grow');
+                        return out;
                     }
-                }
-            });
-
-        // An inline transition shorthand holding var() reads back nothing
-        // through its longhands, so the hold must put the shorthand back
-        // whole; and a class another module's write phase added earlier in
-        // the same frame — on the field or on an ancestor — must transition
-        // with the author's durations rather than land under the hold.
-        scenario(browser, engine, "autogrow puts back an inline var() transition and lets a same-frame class change transition", null,
-            context -> routeCheckPage(context, "autogrow-inline-transition.html", checkPage(
-                ":root{--ag-t:height .3s, background-color 1s linear}" +
-                ".ai{display:block;box-sizing:border-box;width:300px;padding:4px;margin:4px 0;min-height:80px;max-height:4000px;" +
-                "overflow-y:auto;font:16px/20px sans-serif;background-color:rgb(255,255,255)}" +
-                ".ai.dark,.ai-wrap.dark .ai{background-color:rgb(0,0,0)}" +
-                "#ai-phased,#ai-ancestor{transition:background-color 2s linear,height .3s}",
-                "<textarea class=\"ai\" id=\"ai-var\" data-paste-autogrow rows=\"2\" style=\"transition: var(--ag-t)\"></textarea>" +
-                "<textarea class=\"ai\" id=\"ai-var-important\" data-paste-autogrow rows=\"2\" style=\"transition: var(--ag-t) !important\"></textarea>" +
-                "<textarea class=\"ai\" id=\"ai-plain\" data-paste-autogrow rows=\"2\" style=\"transition: height .3s, background-color 1s linear\"></textarea>" +
-                "<textarea class=\"ai\" id=\"ai-longhand\" data-paste-autogrow rows=\"2\"" +
-                " style=\"transition-property: height, background-color; transition-duration: var(--ag-d, .3s)\"></textarea>" +
-                "<textarea class=\"ai\" id=\"ai-phased\" data-paste-autogrow rows=\"2\"></textarea>" +
-                "<div class=\"ai-wrap\" id=\"ai-wrap\"><textarea class=\"ai\" id=\"ai-ancestor\" data-paste-autogrow rows=\"2\"></textarea></div>" +
-                // Registered before the module binds: this phased write runs
-                // ahead of the module's own in the frame.
-                "<script>['ai-phased', 'ai-ancestor'].forEach(id => document.getElementById(id).addEventListener('input', () =>" +
-                " window.aiFrames.requestPhased(() => {}, () => document.getElementById(id === 'ai-phased' ? id : 'ai-wrap')" +
-                ".classList.add('dark'))));</script>",
-                AUTOGROW_SCRIPTS,
-                "paste.define('check.autogrow-inline', ['paste.ui.utilities.animation-frame'], (m, frames) => { window.aiFrames = frames; return m; });"),
-                null),
-            (page, evidence) -> {
-                openCheckPage(page, "autogrow-inline-transition.html");
-                @SuppressWarnings("unchecked")
-                Map<String, Map<String, Map<String, Object>>> run = (Map<String, Map<String, Map<String, Object>>>) page.evaluate("async () => {" +
-                    " const frame = () => new Promise(r => requestAnimationFrame(r));" +
-                    " const long = Array.from({length: 12}, (v, i) => 'line ' + i).join('\\n');" +
-                    " const read = el => [el.style.getPropertyValue('transition'), el.style.getPropertyPriority('transition')," +
-                    "  el.style.getPropertyValue('transition-duration'), getComputedStyle(el).transitionDuration].join('|');" +
-                    " const anims = el => el.getAnimations().map(a => a.transitionProperty).sort().join(',');" +
-                    " const grow = async el => { el.value = long; el.dispatchEvent(new Event('input', {bubbles: true}));" +
-                    "  await frame(); await frame(); };" +
-                    " await new Promise(r => setTimeout(r, 300));" +
-                    " const out = {inline: {}, phased: {}};" +
-                    " for (const id of ['ai-var', 'ai-var-important', 'ai-plain', 'ai-longhand']) {" +
-                    "  const el = document.getElementById(id); const before = read(el); const floor = el.getBoundingClientRect().height;" +
-                    "  await grow(el); const after = read(el); const grown = el.getBoundingClientRect().height;" +
-                    // The author's transition still runs on a later change.
-                    "  el.classList.add('dark'); getComputedStyle(el).backgroundColor; await frame();" +
-                    "  out.inline[id] = {before, after, floor, grown, anims: anims(el)}; }" +
-                    " for (const id of ['ai-phased', 'ai-ancestor']) {" +
-                    "  const el = document.getElementById(id); const floor = el.getBoundingClientRect().height;" +
-                    "  await grow(el);" +
-                    "  out.phased[id] = {floor, grown: el.getBoundingClientRect().height, anims: anims(el)}; }" +
-                    " return out; }");
-                evidence.putAll(run);
-                for (Map<String, Map<String, Object>> group : run.values()) {
-                    for (Map.Entry<String, Map<String, Object>> field : group.entrySet()) {
-                        Map<String, Object> state = field.getValue();
-                        double floor = ((Number) state.get("floor")).doubleValue();
-                        double grown = ((Number) state.get("grown")).doubleValue();
-                        active(grown > floor + 100, field.getKey() + " did not grow with its content: " + floor + " -> " + grown);
-                        List<String> running = List.of(String.valueOf(state.get("anims")).split(","));
-                        require(running.contains("background-color"),
-                            field.getKey() + " lost the author's background transition: running [" + state.get("anims") + "]");
-                        require(!running.contains("height"), field.getKey() + " started a height transition: " + state.get("anims"));
-                    }
-                }
-                for (Map.Entry<String, Map<String, Object>> field : run.get("inline").entrySet()) {
-                    require(field.getValue().get("before").equals(field.getValue().get("after")),
-                        field.getKey() + "'s inline transition was not put back as written: " + field.getValue().get("before") +
-                        " -> " + field.getValue().get("after"));
-                }
+                    """);
+                active(result.size() == 3, "all fields grew and retained their caps");
+                evidence.put("fields", result);
             });
 
         // A sharper rung on <img width height> sized by CSS auto: the
@@ -2304,7 +1845,7 @@ public final class ElementsBrowserChecks {
             (page, evidence) -> {
                 openCheckPage(page, "sequence-sharpen.html");
                 page.evaluate("() => { window.shBoxes = []; const host = document.getElementById('sh-host'); const t0 = performance.now();" +
-                    " const sample = () => { const r = host.getBoundingClientRect(); window.shBoxes.push([r.width, r.height]);" +
+                    " const sample = () => { const r = host.getBoundingClientRect(); window.shBoxes.push([r.width, r.height, host.src, host.currentSrc, host.getAttribute('sizes'), host.getAttribute('srcset'), host.naturalWidth]);" +
                     " if (performance.now() - t0 < 2500) requestAnimationFrame(sample); }; requestAnimationFrame(sample); }");
                 awaitActive(page, "() => /-1280x720\\.png$/.test(document.getElementById('sh-host').currentSrc)");
                 for (double fraction : new double[]{0.2, 0.4}) {
@@ -2397,17 +1938,16 @@ public final class ElementsBrowserChecks {
                     " return [r.width, r.height]; }"));
             });
 
-        // The optional host defaults, read from the mixin source itself,
+        // The optional host defaults, read from freshly compiled CSS,
         // never outrank the user agent's [hidden]: a hidden host stays
         // display none while a shown one still gets its block box.
         scenario(browser, engine, "stylesheet imagesequence host defaults leave a hidden host hidden", null,
             context -> {
                 String rule;
                 try {
-                    Matcher block = Pattern.compile("(?m)^\\s*(:where\\(.*\\))\\s*\\{([^}]*)\\}")
-                        .matcher(Files.readString(Path.of("modules/imagesequence/_mixin.scss")));
-                    require(block.find(), "the mixin declares its host rule");
-                    rule = block.group(1) + "{" + block.group(2) + "}";
+                    JsonObject manifest = JsonParser.parseString(Files.readString(Path.of("target/consistency-assets/manifest.json"))).getAsJsonObject();
+                    String output = manifest.getAsJsonObject("assets").getAsJsonObject("css/modules/imagesequence/imagesequence.css").get("output").getAsString();
+                    rule = Files.readString(Path.of("target/consistency-assets", output.replaceFirst("^/", "")));
                 } catch (java.io.IOException error) {
                     throw new IllegalStateException(error);
                 }
@@ -2510,17 +2050,17 @@ public final class ElementsBrowserChecks {
                 });
         }
 
-        // form: the submit deadline runs on the module's own timer — an
-        // engine may ignore an XHR timeout assigned after send — so a
-        // stalled request releases its target, reports a timeout and
-        // leaves the form free, while a replay-safe form keeps its native
-        // replay. The stalled background request is held unanswered; a
-        // native replay is answered so it can land.
+        // form: a submit stalled past its declared XHR deadline releases
+        // its target, reports a timeout and leaves the form free, while a
+        // replay-safe form keeps its native replay. The background request
+        // is stubbed and its timeout fired directly, so the check does
+        // not depend on an engine delivering an XHR timeout for a request
+        // that never leaves it; a native replay is answered so it lands.
         String[] formDeadlineScripts = {"/js/paste/paste.js", "/js/paste/util.js", "/js/paste/guid.js",
-            "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/form.js"};
+            "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/form/form_validity.js", "/js/paste/ui/form/form_html.js"};
         for (String kind : List.of("post", "idempotent post", "get")) {
             List<String> stallRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
-            scenario(browser, engine, "form deadline releases a stalled " + kind + " submit on the module timer", null,
+            scenario(browser, engine, "form settles a stalled " + kind + " submit as a timeout", null,
                 context -> {
                     routeCheckPage(context, "form-deadline.html", checkPage("",
                         "<div id=\"dl-reply\" data-paste-io-reply-fragment-target>" +
@@ -2530,8 +2070,11 @@ public final class ElementsBrowserChecks {
                         "<input name=\"message\" value=\"hello\"><button name=\"intent\" value=\"save\">Send</button>" +
                         "</form></div>",
                         formDeadlineScripts,
-                        "window.dlFailures = []; document.addEventListener('paste.ui.form:failed'," +
-                        " e => dlFailures.push(e.detail.reason));"), null);
+                        "window.dlFailures = []; document.addEventListener('paste.ui.formhtml:failed'," +
+                        " e => dlFailures.push(e.detail.reason));" +
+                        " window.dlRequests = []; paste.io.open = (method, url) => {" +
+                        " const request = {responseURL: url, timeout: 0, setRequestHeader(){}," +
+                        " send(){ dlRequests.push(request); }, abort(){}}; return request; };"), null);
                     context.route(requestUrl -> URI.create(requestUrl).getPath().equals("/form-stall"), route -> {
                         stallRequests.add(route.request().resourceType() + " " + route.request().method());
                         if ("document".equals(route.request().resourceType())) {
@@ -2545,6 +2088,13 @@ public final class ElementsBrowserChecks {
                     verifyPageDependencies(page);
                     page.click("#dl-reply button");
                     awaitActive(page, "() => document.getElementById('dl-reply').getAttribute('aria-busy') === 'true'");
+                    require(Boolean.TRUE.equals(page.evaluate("() => dlRequests.length === 1")),
+                        "the submit never reached the stubbed request: " +
+                        page.evaluate("() => dlRequests.length") + " sends");
+                    require(Boolean.TRUE.equals(page.evaluate("() => dlRequests[0].timeout === 500")),
+                        "the declared deadline reached the request as " +
+                        page.evaluate("() => dlRequests[0].timeout"));
+                    page.evaluate("() => dlRequests[0].ontimeout()");
                     if (!kind.equals("post")) {
                         boolean replayed;
                         try {
@@ -2557,8 +2107,8 @@ public final class ElementsBrowserChecks {
                         evidence.put("requests", List.copyOf(stallRequests));
                         require(replayed, "the expired " + kind + " never replayed natively: still at " + page.url() +
                             ", requests " + stallRequests);
-                        require(stallRequests.size() == 2 && stallRequests.get(1).startsWith("document "),
-                            "one background request then one native replay: " + stallRequests);
+                        require(stallRequests.size() == 1 && stallRequests.get(0).startsWith("document "),
+                            "the only routed request was the native replay: " + stallRequests);
                         return;
                     }
                     try {
@@ -2574,13 +2124,18 @@ public final class ElementsBrowserChecks {
                     require("timeout".equals(failures), "a stalled submit past its 500 ms deadline reported [" + failures +
                         "], not a timeout");
                     require(busy == null, "the stalled submit still holds aria-busy=" + busy);
-                    require(page.locator("#dl-reply .paste-ui-form-failure[role=alert]").count() == 1,
+                    require(page.locator("#dl-reply .paste-ui-formhtml-failure[role=alert]").count() == 1,
                         "the expired post shows the default notice");
                     page.click("#dl-reply button");
-                    page.waitForCondition(() -> stallRequests.size() == 2,
-                        new Page.WaitForConditionOptions().setTimeout(3000));
-                    evidence.put("requests", List.copyOf(stallRequests));
-                    require(stallRequests.size() == 2, "the next submit was swallowed: " + stallRequests);
+                    try {
+                        page.waitForFunction("() => dlRequests.length === 2", null,
+                            new Page.WaitForFunctionOptions().setTimeout(3000));
+                    } catch (PlaywrightException error) {
+                        // The assertion below names what was left.
+                    }
+                    evidence.put("sends", page.evaluate("() => dlRequests.length"));
+                    require(Boolean.TRUE.equals(page.evaluate("() => dlRequests.length === 2")),
+                        "the next submit was swallowed: " + page.evaluate("() => dlRequests.length") + " sends");
                 });
         }
 
@@ -2600,7 +2155,7 @@ public final class ElementsBrowserChecks {
                             "<input name=\"message\" value=\"hello\"><button name=\"intent\" value=\"save\">Send</button>" +
                             "</form></div><a id=\"lv-away\" href=\"/form-away\">Away</a>",
                             formDeadlineScripts,
-                            "document.addEventListener('paste.ui.form:failed', e => { try { sessionStorage.setItem('lvFailures'," +
+                            "document.addEventListener('paste.ui.formhtml:failed', e => { try { sessionStorage.setItem('lvFailures'," +
                             " (sessionStorage.getItem('lvFailures') || '') + e.detail.reason + ' '); } catch (ignore) {} });"), null);
                         context.route(requestUrl -> URI.create(requestUrl).getPath().equals("/form-slow"), route -> {
                             slowRequests.add(route.request().resourceType() + " " + route.request().method());
@@ -2669,7 +2224,7 @@ public final class ElementsBrowserChecks {
                         "<input name=\"message\" value=\"hello\"><button name=\"intent\" value=\"save\">Send</button>" +
                         "</form></div><a id=\"fd-file\" href=\"/form-file\">File</a>",
                         formDeadlineScripts,
-                        "window.fdFailures = []; document.addEventListener('paste.ui.form:failed', e => fdFailures.push(e.detail.reason));"), null);
+                        "window.fdFailures = []; document.addEventListener('paste.ui.formhtml:failed', e => fdFailures.push(e.detail.reason));"), null);
                     // The background request is held unanswered; a native
                     // replay is answered so it can land.
                     context.route(requestUrl -> URI.create(requestUrl).getPath().equals("/form-pending"), route -> {
@@ -2701,7 +2256,7 @@ public final class ElementsBrowserChecks {
                     Map<?, ?> state;
                     try {
                         state = (Map<?, ?>) page.evaluate("() => ({failures: (window.fdFailures || []).join(' '), href: location.href," +
-                            " notices: document.querySelectorAll('#fd-reply .paste-ui-form-failure[role=alert]').length," +
+                            " notices: document.querySelectorAll('#fd-reply .paste-ui-formhtml-failure[role=alert]').length," +
                             " busy: document.getElementById('fd-reply') ? document.getElementById('fd-reply').getAttribute('aria-busy') : 'gone'})");
                     } catch (PlaywrightException error) {
                         state = Map.of("unreadable", error.getMessage().split("\n")[0]);
@@ -2812,7 +2367,7 @@ public final class ElementsBrowserChecks {
         // Fragment links stay native browser navigation: the address,
         // :target, hashchange and history are the browser's, the section
         // nav stylesheet's zero-specificity target clearance lands each
-        // target at the stuck nav's bottom, and smoothscroll only moves
+        // target at the stuck nav's bottom, and the browser moves
         // focus once the navigation has landed. The clearance rule is read
         // from the mixin source, its auto default resolved from the
         // mixin's own height and bottom-border defaults; a mixin without
@@ -2836,18 +2391,17 @@ public final class ElementsBrowserChecks {
         String[] fragmentScripts = {
             "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
             "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
-            "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/stickynav.js",
-            "/js/paste/ui/smoothscroll.js"};
+            "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/stickynav.js"};
         String fragmentPage = checkPage(
             "html{scroll-behavior:auto}" + fragmentClearanceRule +
             ".paste-ui-section-nav{background:#fff;border-bottom:" + fragmentNavBorder + " solid #ccc}" +
             ".paste-ui-section-nav-items{display:flex;height:" + fragmentNavHeight + ";margin:0;padding:0;list-style:none}" +
             ".fn-slot{height:calc(" + fragmentNavHeight + " + " + fragmentNavBorder + ")}" +
-            ".paste-fixed-subnav .sticky-nav-target{position:fixed;top:0;left:0;right:0;z-index:2}" +
+            ".paste-ui-sticky-active{position:fixed;top:0;left:0;right:0;z-index:2}" +
             "#fn-intro{height:300px}section{height:1200px}#fn-note{display:none;height:400px}#fn-note:target{display:block}" +
             "#fn-tail{height:3000px}",
-            "<div id=\"fn-intro\">intro</div><div class=\"fn-slot\">" +
-            "<nav id=\"fn-nav\" class=\"paste-ui-section-nav sticky-nav-target\" aria-label=\"Sections\">" +
+            "<div id=\"fn-intro\" data-paste-sticky-target>intro</div><div class=\"fn-slot\">" +
+            "<nav id=\"fn-nav\" data-paste-sticky-nav class=\"paste-ui-section-nav sticky-nav-target\" aria-label=\"Sections\">" +
             "<ul class=\"paste-ui-section-nav-items\">" +
             "<li class=\"paste-ui-section-nav-item\"><a id=\"fn-go-one\" class=\"paste-ui-section-nav-link\" href=\"#fn-one\">One</a></li>" +
             "<li class=\"paste-ui-section-nav-item\"><a id=\"fn-go-two\" class=\"paste-ui-section-nav-link\" href=\"#fn-two\">Two</a></li>" +
@@ -2855,9 +2409,9 @@ public final class ElementsBrowserChecks {
             "<li class=\"paste-ui-section-nav-item\"><a id=\"fn-go-cafe\" class=\"paste-ui-section-nav-link\" href=\"#fn-café\">Café</a></li>" +
             "<li class=\"paste-ui-section-nav-item\"><a id=\"fn-go-inside\" class=\"paste-ui-section-nav-link\" href=\"#fn-inside\">Details</a></li>" +
             "</ul></nav></div>" +
-            "<section id=\"fn-one\">One</section><section id=\"fn-two\">Two<input id=\"fn-two-field\" aria-label=\"Field\"></section>" +
-            "<div id=\"fn-note\">revealed by :target</div><section id=\"fn-café\">Café</section>" +
-            "<details id=\"fn-details\"><summary>More</summary><p id=\"fn-inside\">inside a closed details element</p></details>" +
+            "<section tabindex=\"-1\" id=\"fn-one\">One</section><section tabindex=\"-1\" id=\"fn-two\">Two<input id=\"fn-two-field\" aria-label=\"Field\"></section>" +
+            "<div tabindex=\"-1\" id=\"fn-note\">revealed by :target</div><section tabindex=\"-1\" id=\"fn-café\">Café</section>" +
+            "<details id=\"fn-details\"><summary>More</summary><p tabindex=\"-1\" id=\"fn-inside\">inside a closed details element</p></details>" +
             "<div id=\"fn-tail\">tail</div>",
             fragmentScripts,
             "window.fnHashChanges = []; addEventListener('hashchange', () => fnHashChanges.push(location.hash));");
@@ -2868,14 +2422,14 @@ public final class ElementsBrowserChecks {
               const target = document.getElementById(id);
               const nav = document.getElementById('fn-nav').getBoundingClientRect();
               resolve({hash: location.hash, top: target.getBoundingClientRect().top, navBottom: nav.bottom,
-                stuck: document.documentElement.classList.contains('paste-fixed-subnav'),
+                stuck: document.getElementById('fn-nav').classList.contains('paste-ui-sticky-active'),
                 target: target.matches(':target'), focused: document.activeElement === target,
                 active: document.activeElement && (document.activeElement.id || document.activeElement.tagName),
                 hashChanges: fnHashChanges.slice(), length: history.length});
             }, 30))))
             """;
 
-        scenario(browser, engine, "smoothscroll native fragment navigation lands below the sticky nav with history", null,
+        scenario(browser, engine, "native fragment navigation lands below the sticky nav with history", null,
             context -> routeCheckPage(context, "fragment-nav.html", fragmentPage, null),
             (page, evidence) -> {
                 openCheckPage(page, "fragment-nav.html");
@@ -2938,7 +2492,7 @@ public final class ElementsBrowserChecks {
                 // Reveal of a closed details element is the engine's: where
                 // it reveals, the target lands and takes focus. Where it does
                 // not, an engine may still focus the hidden target (WebKit)
-                // or refuse; the borrowed tabindex stays only while focus does.
+                // or refuse; the authored tabindex stays unchanged.
                 boolean revealSupported = Boolean.TRUE.equals(page.evaluate("() => 'onbeforematch' in document.body"));
                 page.click("#fn-go-inside");
                 page.waitForFunction("() => location.hash === '#fn-inside'");
@@ -2951,19 +2505,18 @@ public final class ElementsBrowserChecks {
                         Boolean.TRUE.equals(inside.get("focused")),
                         "an engine that reveals closed details must open it and focus the target: " + inside);
                 } else {
-                    require(Boolean.TRUE.equals(page.evaluate("() => document.getElementById('fn-inside').hasAttribute('tabindex') ===" +
-                        " (document.activeElement === document.getElementById('fn-inside'))")),
-                        "a target the engine leaves hidden must keep a borrowed tabindex only while it holds focus");
+                    require(Boolean.TRUE.equals(page.evaluate("() => document.getElementById('fn-inside').getAttribute('tabindex') === '-1'")),
+                        "a hidden target must keep its authored tabindex");
                 }
             });
 
-        scenario(browser, engine, "smoothscroll native fragment navigation lands a loaded fragment below the sticky nav", null,
+        scenario(browser, engine, "native fragment navigation lands a loaded fragment below the sticky nav", null,
             context -> routeCheckPage(context, "fragment-nav.html", fragmentPage, null),
             (page, evidence) -> {
                 Response navigation = page.navigate(url + "checks/fragment-nav.html#fn-two",
                     new Page.NavigateOptions().setWaitUntil(WaitUntilState.LOAD));
                 require(navigation != null && navigation.ok(), "regression page fragment-nav.html loads");
-                awaitActive(page, "() => document.documentElement.classList.contains('paste-fixed-subnav')");
+                awaitActive(page, "() => document.getElementById('fn-nav').classList.contains('paste-ui-sticky-active')");
                 Map<?, ?> landed = (Map<?, ?>) page.evaluate(fragmentLanding, "fn-two");
                 evidence.put("loaded", landed);
                 require(Boolean.TRUE.equals(landed.get("target")), "the loaded fragment must match :target");
@@ -2974,17 +2527,17 @@ public final class ElementsBrowserChecks {
         // An ordinary in-page link changes the fragment without touching
         // multistate's selection; traversing back to the page's first
         // entry restores the authored defaults.
-        scenario(browser, engine, "smoothscroll native fragment navigation keeps multistate's selection", null,
+        scenario(browser, engine, "native fragment navigation keeps multistate's selection", null,
             context -> routeCheckPage(context, "fragment-multistate.html", checkPage(
                 "[data-multistate-value]{display:none}[data-multistate-state]{display:block}section{height:1500px}",
-                "<input id=\"fm-a\" type=\"radio\" data-multistate-key=\"area1\" value=\"a\" checked><label for=\"fm-a\">A</label>" +
-                "<input id=\"fm-b\" type=\"radio\" data-multistate-key=\"area1\" value=\"b\"><label for=\"fm-b\">B</label>" +
+                "<input id=\"fm-a\" type=\"radio\" name=\"area1\" data-multistate-key=\"area1\" value=\"a\" checked><label for=\"fm-a\">A</label>" +
+                "<input id=\"fm-b\" type=\"radio\" name=\"area1\" data-multistate-key=\"area1\" value=\"b\"><label for=\"fm-b\">B</label>" +
                 "<div data-multistate-key=\"area1\" data-multistate-value=\"a\">panel a</div>" +
                 "<div data-multistate-key=\"area1\" data-multistate-value=\"b\">panel b</div>" +
                 "<nav class=\"paste-ui-section-nav\"><a id=\"fm-go\" href=\"#fm-section\">Section</a></nav>" +
-                "<section>gap</section><section id=\"fm-section\">Section</section>",
+                "<section>gap</section><section tabindex=\"-1\" id=\"fm-section\">Section</section>",
                 new String[]{"/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
-                    "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/ui/multistate.js", "/js/paste/ui/smoothscroll.js"},
+                    "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/ui/multistate.js"},
                 null), null),
             (page, evidence) -> {
                 openCheckPage(page, "fragment-multistate.html");
@@ -3011,50 +2564,73 @@ public final class ElementsBrowserChecks {
                 evidence.put("first", page.evaluate(selection));
             });
 
-        // data-hero-hashclick navigates natively to the next hero: a
-        // fragment navigation to a hero with an id, a history entry and a
-        // scroll to one without, and a scroll when the address already
-        // names it.
-        scenario(browser, engine, "heroscroll hash click navigates natively to the next hero", null,
-            context -> routeCheckPage(context, "hero-hashclick.html", checkPage(
-                "html{scroll-behavior:auto}.paste-ui-hero{position:relative;height:700px;margin:0}" +
-                ".paste-ui-hero-content{padding:40px}#hh-tail{height:3000px}",
-                "<section id=\"hh-one\" class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">one</div></section>" +
-                "<section id=\"hh-two\" class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">two</div></section>" +
-                "<section class=\"paste-ui-hero\" id=\"\"><div class=\"paste-ui-hero-content\">three</div></section>" +
-                "<div id=\"hh-tail\">tail</div>",
-                HEROSCROLL_SCRIPTS,
-                "window.hhHashChanges = []; addEventListener('hashchange', () => hhHashChanges.push(location.hash));"), null),
-            (page, evidence) -> {
-                openCheckPage(page, "hero-hashclick.html");
-                String heroTop = "n => document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top";
-                Number startLength = (Number) page.evaluate("() => history.length");
-                page.click("#hh-one", new Page.ClickOptions().setPosition(20, 10));
-                awaitActive(page, "() => location.hash === '#hh-two'");
-                page.waitForFunction("() => hhHashChanges.includes('#hh-two')");
-                Map<?, ?> first = (Map<?, ?>) page.evaluate("() => ({hash: location.hash, target: document.getElementById('hh-two').matches(':target')," +
-                    " top: document.getElementById('hh-two').getBoundingClientRect().top, length: history.length, hashChanges: hhHashChanges.slice()})");
-                evidence.put("toIdentified", first);
-                require(Boolean.TRUE.equals(first.get("target")), "the next hero must match :target");
-                require(Math.abs(((Number) first.get("top")).doubleValue()) <= 1, "the next hero must reach the viewport top: " + first);
-                require(((Number) first.get("length")).intValue() == startLength.intValue() + 1, "the fragment navigation must add a history entry");
+        // Authored links own navigation with or without the hero effect
+        // module. A retired declaration must not revive background clicks.
+        for (boolean enhanced : new boolean[] {false, true}) {
+            scenario(browser, engine, "hero native anchors preserve URL and history " +
+                (enhanced ? "with heroscroll" : "without application scripts"), null,
+                context -> {
+                    context.addInitScript("window.heroNavigationWork = {clickListeners:0,pushes:0,replaces:0,scrolls:0};" +
+                        "(() => { const add = EventTarget.prototype.addEventListener;" +
+                        " EventTarget.prototype.addEventListener = function(type) {" +
+                        " if (type === 'click') heroNavigationWork.clickListeners++; return add.apply(this, arguments); };" +
+                        " for (const [method, key] of [['pushState','pushes'],['replaceState','replaces']]) {" +
+                        " const original = history[method]; history[method] = function() {" +
+                        " heroNavigationWork[key]++; return original.apply(this, arguments); }; }" +
+                        " const scroll = Element.prototype.scrollIntoView; Element.prototype.scrollIntoView = function() {" +
+                        " heroNavigationWork.scrolls++; return scroll.apply(this, arguments); }; })();");
+                    routeCheckPage(context, "hero-native-links.html", checkPage(
+                        "html{scroll-behavior:auto}.paste-ui-hero{height:700px;margin:0;position:relative}" +
+                        "#hn-wrap{display:block}#hn-tail{height:2000px}",
+                        "<a id=\"hn-wrap\" href=\"#hn-two\"><section id=\"hn-one\" class=\"paste-ui-hero\" data-hero-hashclick>Next section</section></a>" +
+                        "<section id=\"hn-two\" class=\"paste-ui-hero\" data-hero-hashclick>" +
+                        "<a id=\"hn-next\" href=\"#hn-three\">Continue</a><button id=\"hn-control\" type=\"button\">Control</button></section>" +
+                        "<section id=\"hn-three\" class=\"paste-ui-hero\">Third section</section><div id=\"hn-tail\">Tail</div>",
+                        enhanced ? HEROSCROLL_SCRIPTS : new String[0], null), null);
+                },
+                (page, evidence) -> {
+                    openCheckPage(page, "hero-native-links.html");
+                    require(Boolean.valueOf(enhanced).equals(page.evaluate(
+                        "() => document.documentElement.classList.contains('paste-ui-heroscroll-loaded')")),
+                        "the page must load exactly the selected hero enhancement");
+                    // Read before the first automated click: the browser
+                    // driver's hit-target probe installs its own listener.
+                    int clicksAtLoad = ((Number) page.evaluate("() => heroNavigationWork.clickListeners")).intValue();
+                    evidence.put("clickListenersAtLoad", clicksAtLoad);
+                    require(clicksAtLoad == 0, "loading hero effects must not bind navigation clicks");
+                    int start = ((Number) page.evaluate("() => history.length")).intValue();
+                    page.click("#hn-wrap", new Page.ClickOptions().setPosition(20, 30));
+                    awaitActive(page, "() => location.hash === '#hn-two' && document.getElementById('hn-two').matches(':target')");
+                    page.waitForFunction("() => Math.abs(document.getElementById('hn-two').getBoundingClientRect().top) <= 1");
+                    require(((Number) page.evaluate("() => history.length")).intValue() == start + 1,
+                        "the browser must create the link's fragment history entry");
+                    Object before = page.evaluate("() => ({url:location.href,length:history.length,y:scrollY})");
+                    page.click("#hn-two", new Page.ClickOptions().setPosition(300, 150));
+                    page.click("#hn-control");
+                    frames(page);
+                    require(before.equals(page.evaluate("() => ({url:location.href,length:history.length,y:scrollY})")),
+                        "background and button clicks must not navigate to the next hero");
+                    page.focus("#hn-next");
+                    page.keyboard().press("Enter");
+                    page.waitForFunction("() => location.hash === '#hn-three' && document.getElementById('hn-three').matches(':target')");
+                    require(((Number) page.evaluate("() => history.length")).intValue() == start + 2,
+                        "keyboard activation must use ordinary link history");
+                    page.goBack();
+                    page.waitForFunction("() => location.hash === '#hn-two' && Math.abs(document.getElementById('hn-two').getBoundingClientRect().top) <= 1");
+                    page.goForward();
+                    page.waitForFunction("() => location.hash === '#hn-three' && Math.abs(document.getElementById('hn-three').getBoundingClientRect().top) <= 1");
+                    Map<?, ?> work = (Map<?, ?>) page.evaluate("() => ({pushes:heroNavigationWork.pushes," +
+                        "replaces:heroNavigationWork.replaces,scrolls:heroNavigationWork.scrolls})");
+                    evidence.put("navigationCalls", work);
+                    require(work.values().stream().allMatch(value -> ((Number) value).intValue() == 0),
+                        "navigation must require no scripted history or scrolling calls: " + work);
+                    page.reload();
+                    page.waitForFunction("() => location.hash === '#hn-three' && document.getElementById('hn-three').matches(':target')");
+                    page.waitForFunction("() => Math.abs(document.getElementById('hn-three').getBoundingClientRect().top) <= 1");
+                    evidence.put("reloadedUrl", page.url());
+                });
+        }
 
-                page.click("#hh-two", new Page.ClickOptions().setPosition(20, 10));
-                page.waitForFunction("n => Math.abs(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top) <= 1", 2);
-                Map<?, ?> unidentified = (Map<?, ?>) page.evaluate("() => ({hash: location.hash, length: history.length," +
-                    " top: document.querySelectorAll('.paste-ui-hero')[2].getBoundingClientRect().top})");
-                evidence.put("toUnidentified", unidentified);
-                require("".equals(unidentified.get("hash")) && ((Number) unidentified.get("length")).intValue() == startLength.intValue() + 2,
-                    "a hero without an id must get its own entry, without the fragment of the hero it left: " + unidentified);
-
-                page.evaluate("() => window.scrollTo(0, 0)");
-                page.waitForFunction("() => scrollY === 0");
-                page.click("#hh-one", new Page.ClickOptions().setPosition(20, 10));
-                page.waitForFunction("n => Math.abs(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top) <= 1", 1);
-                evidence.put("toCurrent", page.evaluate("() => ({hash: location.hash, top: document.getElementById('hh-two').getBoundingClientRect().top, length: history.length})"));
-                require(((Number) page.evaluate(heroTop, 1)).doubleValue() <= 1,
-                    "a hash click to the fragment already current must still reach the next hero");
-            });
     }
 
     // imagesequence background claims, baseline adoption and decode
@@ -3902,110 +3478,6 @@ public final class ElementsBrowserChecks {
             throw new IllegalStateException(error);
         }
 
-        // A link inside an editable region is not followed, and a
-        // navigation a navigate listener cancels never lands; neither
-        // fires hashchange. A later script navigation to the same
-        // fragment must not hand focus to its target.
-        scenario(browser, engine, "smoothscroll stops waiting on a click the browser never navigates", null,
-            context -> routeCheckPage(context, "fragment-unnavigated.html", checkPage(
-                "html{scroll-behavior:auto}section{height:1500px}",
-                "<nav class=\"paste-ui-section-nav\"><a id=\"nn-go-one\" href=\"#nn-one\">One</a>" +
-                " <span contenteditable=\"true\"><a id=\"nn-edit-go\" href=\"#nn-two\">Two</a></span>" +
-                " <a id=\"nn-cancel-go\" href=\"#nn-three\">Three</a></nav>" +
-                "<section id=\"nn-one\">One<input id=\"nn-field\" aria-label=\"Field\"></section>" +
-                "<section id=\"nn-two\">Two</section><section id=\"nn-three\">Three</section>",
-                SMOOTHSCROLL_SCRIPTS, null), null),
-            (page, evidence) -> {
-                openCheckPage(page, "fragment-unnavigated.html");
-                String later = """
-                    hash => new Promise(resolve => {
-                      document.getElementById('nn-field').focus();
-                      addEventListener('hashchange', () => setTimeout(() => resolve({hash: location.hash,
-                        active: document.activeElement && (document.activeElement.id || document.activeElement.tagName),
-                        borrowed: document.querySelectorAll('section[tabindex]').length}), 300), {once: true});
-                      location.hash = hash;
-                    })
-                    """;
-                page.click("#nn-edit-go");
-                page.waitForTimeout(600);
-                evidence.put("afterEditableClick", page.evaluate("() => location.hash"));
-                require("".equals(page.evaluate("() => location.hash")), "precondition: a link inside an editable region is not followed");
-                Map<?, ?> editable = (Map<?, ?>) page.evaluate(later, "nn-two");
-                evidence.put("editableThenScript", editable);
-                require("#nn-two".equals(editable.get("hash")) && !"nn-two".equals(editable.get("active")) &&
-                    ((Number) editable.get("borrowed")).intValue() == 0,
-                    "a later navigation took focus for a click that never navigated: " + editable);
-
-                boolean navigationApi = Boolean.TRUE.equals(page.evaluate("() => 'navigation' in window"));
-                evidence.put("navigationApi", navigationApi);
-                if (navigationApi) {
-                    page.evaluate("() => navigation.addEventListener('navigate', e => { if (e.hashChange) e.preventDefault(); }, {once: true})");
-                    page.click("#nn-cancel-go");
-                    page.waitForTimeout(600);
-                    require("#nn-two".equals(page.evaluate("() => location.hash")), "precondition: the navigate listener cancelled the link");
-                    Map<?, ?> cancelled = (Map<?, ?>) page.evaluate(later, "nn-three");
-                    evidence.put("cancelledThenScript", cancelled);
-                    require("#nn-three".equals(cancelled.get("hash")) && !"nn-three".equals(cancelled.get("active")) &&
-                        ((Number) cancelled.get("borrowed")).intValue() == 0,
-                        "a later navigation took focus for a cancelled navigation: " + cancelled);
-                }
-
-                // The module is live: an ordinary click still focuses.
-                page.focus("#nn-field");
-                page.click("#nn-go-one");
-                awaitActive(page, "() => document.activeElement === document.getElementById('nn-one') && location.hash === '#nn-one'");
-            });
-
-        // The browser's fragment lookup and its rules for choosing a
-        // browsing context: an <a name> is a target when no id matches, an
-        // id outranks a name, and _top, _parent (any case) and the window's
-        // own name navigate a top-level document in place.
-        scenario(browser, engine, "smoothscroll focuses a named anchor and a link targeting this window by keyword or name", null,
-            context -> routeCheckPage(context, "fragment-contexts.html", checkPage(
-                "html{scroll-behavior:auto}section{height:1200px}",
-                "<nav class=\"paste-ui-section-nav\">" +
-                "<a id=\"fc-go-named\" href=\"#fc-named\">Named</a> <a id=\"fc-go-both\" href=\"#fc-both\">Both</a>" +
-                " <a id=\"fc-go-top\" href=\"#fc-top\" target=\"_top\">Top</a>" +
-                " <a id=\"fc-go-parent\" href=\"#fc-parent\" target=\"_parent\">Parent</a>" +
-                " <a id=\"fc-go-upper\" href=\"#fc-upper\" target=\"_TOP\">Upper</a>" +
-                " <a id=\"fc-go-self\" href=\"#fc-self\" target=\"fc-main\">Self by name</a></nav>" +
-                "<input id=\"fc-field\" aria-label=\"Field\">" +
-                "<section>gap</section><a name=\"fc-named\"></a><section>named</section>" +
-                "<a name=\"fc-both\"></a><section>name only</section><section id=\"fc-both\">id</section>" +
-                "<section id=\"fc-top\">top</section><section id=\"fc-parent\">parent</section>" +
-                "<section id=\"fc-upper\">upper</section><section id=\"fc-self\">self</section>",
-                SMOOTHSCROLL_SCRIPTS, "window.name = 'fc-main';"), null),
-            (page, evidence) -> {
-                openCheckPage(page, "fragment-contexts.html");
-                require(Boolean.TRUE.equals(page.evaluate("() => window.top === window && window.parent === window")),
-                    "precondition: the page is a top-level document");
-                String[][] links = {
-                    {"fc-go-named", "#fc-named", "() => document.activeElement === document.getElementsByName('fc-named')[0]"},
-                    {"fc-go-both", "#fc-both", "() => document.activeElement === document.getElementById('fc-both')"},
-                    {"fc-go-top", "#fc-top", "() => document.activeElement === document.getElementById('fc-top')"},
-                    {"fc-go-parent", "#fc-parent", "() => document.activeElement === document.getElementById('fc-parent')"},
-                    {"fc-go-upper", "#fc-upper", "() => document.activeElement === document.getElementById('fc-upper')"},
-                    {"fc-go-self", "#fc-self", "() => document.activeElement === document.getElementById('fc-self')"}};
-                Map<String, Object> landed = new LinkedHashMap<>();
-                List<String> unfocused = new ArrayList<>();
-                for (String[] link : links) {
-                    page.focus("#fc-field");
-                    int pages = page.context().pages().size();
-                    page.click("#" + link[0]);
-                    page.waitForFunction("hash => location.hash === hash", link[1]);
-                    page.waitForTimeout(400);
-                    Map<?, ?> state = (Map<?, ?>) page.evaluate("check => ({focused: (0, eval)(check)()," +
-                        " active: document.activeElement && (document.activeElement.id || document.activeElement.getAttribute('name') ||" +
-                        " document.activeElement.tagName), tabindex: document.activeElement && document.activeElement.getAttribute('tabindex')})", link[2]);
-                    landed.put(link[0], state);
-                    require(page.context().pages().size() == pages, link[0] + " opened another browsing context");
-                    if (!Boolean.TRUE.equals(state.get("focused"))) unfocused.add(link[0]);
-                }
-                evidence.put("landed", landed);
-                require(unfocused.isEmpty(), "links that navigated in place but moved no focus: " + unfocused + " " + landed);
-                active(true, "every link navigated this document in place");
-            });
-
         // The browser adds a target's scroll-margin to the scroller's
         // scroll-padding. A page that clears its chrome with
         // scroll-padding-top zeroes the section nav clearance, as the
@@ -4016,8 +3488,8 @@ public final class ElementsBrowserChecks {
                 "#sp-nav{position:fixed;top:0;left:0;right:0;height:60px;background:#fff}section{height:1500px}",
                 "<nav id=\"sp-nav\" class=\"paste-ui-section-nav\"><a id=\"sp-go-one\" href=\"#sp-one\">One</a>" +
                 " <a id=\"sp-go-two\" href=\"#sp-two\">Two</a></nav>" +
-                "<section>gap</section><section id=\"sp-one\">One</section><section id=\"sp-two\">Two</section>",
-                SMOOTHSCROLL_SCRIPTS, null), null),
+                "<section>gap</section><section tabindex=\"-1\" id=\"sp-one\">One</section><section tabindex=\"-1\" id=\"sp-two\">Two</section>",
+                new String[0], null), null),
             (page, evidence) -> {
                 openCheckPage(page, "fragment-scroll-padding.html");
                 String top = "id => document.getElementById(id).getBoundingClientRect().top";
@@ -4037,76 +3509,7 @@ public final class ElementsBrowserChecks {
                 active(Math.abs(summed - 111) <= 1, "the default clearance adds to scroll-padding (" + summed + ")");
             });
 
-        // A hero without an id is no fragment target: the stylesheet's
-        // clearance still lands it below a fixed nav, and its history
-        // entry, written before the scroll and without the fragment of
-        // the hero being left, lets each Back return to the hero the
-        // visitor left in every engine.
-        scenario(browser, engine, "heroscroll hash click to a hero without an id lands below the nav and Back returns to each hero", null,
-            context -> routeCheckPage(context, "hero-unnamed.html", checkPage(
-                "html{scroll-behavior:auto}" + clearanceRule +
-                "#hz-nav{position:fixed;top:0;left:0;right:0;height:51px;background:#fff;z-index:2}#hz-slot{height:51px}" +
-                ".paste-ui-hero{position:relative;height:700px;margin:0}.paste-ui-hero-content{padding:40px}#hz-tail{height:3000px}",
-                "<div id=\"hz-nav\">nav</div><div id=\"hz-slot\"></div>" +
-                "<section id=\"hz-one\" class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">one</div></section>" +
-                "<section id=\"hz-two\" class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">two</div></section>" +
-                "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">three</div></section>" +
-                "<section id=\"hz-four\" class=\"paste-ui-hero\"><div class=\"paste-ui-hero-content\">four</div></section>" +
-                "<div id=\"hz-tail\">tail</div>",
-                HEROSCROLL_SCRIPTS, null), null),
-            (page, evidence) -> {
-                openCheckPage(page, "hero-unnamed.html");
-                require(!clearanceRule.isEmpty(), "the mixin's clearance rule was not found");
-                String landing = "n => { const hero = document.querySelectorAll('.paste-ui-hero')[n];" +
-                    " return {hash: location.hash, top: hero.getBoundingClientRect().top, y: scrollY, length: history.length}; }";
-                String settledAt = "n => Math.abs(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top - 51) <= 1";
-                int start = ((Number) page.evaluate("() => history.length")).intValue();
 
-                page.click("#hz-one", new Page.ClickOptions().setPosition(20, 100));
-                awaitActive(page, "() => location.hash === '#hz-two' && document.getElementById('hz-two').getBoundingClientRect().top <= 52");
-                frames(page);
-                Map<?, ?> named = (Map<?, ?>) page.evaluate(landing, 1);
-                evidence.put("toNamed", named);
-
-                page.click("#hz-two", new Page.ClickOptions().setPosition(20, 100));
-                frames(page);
-                Map<?, ?> unnamed = (Map<?, ?>) page.evaluate(landing, 2);
-                evidence.put("toUnnamed", unnamed);
-                require(Math.abs(((Number) unnamed.get("top")).doubleValue() - 51) <= 1,
-                    "a hero without an id must land below the fixed nav: " + unnamed);
-                require(((Number) unnamed.get("length")).intValue() == start + 2,
-                    "a hero without an id must get a history entry of its own: " + unnamed);
-                require("".equals(unnamed.get("hash")), "the entry must drop the fragment of the hero it left: " + unnamed);
-
-                page.mouse().click(20, 151);
-                page.waitForFunction("() => location.hash === '#hz-four'");
-                frames(page);
-                evidence.put("toFour", page.evaluate(landing, 3));
-
-                page.evaluate("() => history.back()");
-                page.waitForFunction("() => location.hash === ''");
-                try {
-                    page.waitForFunction(settledAt, 2, new Page.WaitForFunctionOptions().setTimeout(3000));
-                } catch (PlaywrightException error) {
-                    evidence.put("backWaitError", error.getMessage().split("\n")[0]);
-                }
-                Map<?, ?> back = (Map<?, ?>) page.evaluate(landing, 2);
-                evidence.put("back", back);
-                require(Math.abs(((Number) back.get("top")).doubleValue() - 51) <= 1,
-                    "Back must return to the hero without an id: " + back);
-
-                page.evaluate("() => history.back()");
-                page.waitForFunction("() => location.hash === '#hz-two'");
-                try {
-                    page.waitForFunction(settledAt, 1, new Page.WaitForFunctionOptions().setTimeout(3000));
-                } catch (PlaywrightException error) {
-                    evidence.put("back2WaitError", error.getMessage().split("\n")[0]);
-                }
-                Map<?, ?> back2 = (Map<?, ?>) page.evaluate(landing, 1);
-                evidence.put("back2", back2);
-                require(Math.abs(((Number) back2.get("top")).doubleValue() - 51) <= 1,
-                    "a second Back must return to the hero before it: " + back2);
-            });
     }
 
     // progressiveresolution background attachments: a fixed background
@@ -4308,111 +3711,10 @@ public final class ElementsBrowserChecks {
                 require(wrong.isEmpty(), "a fixed background was not sized for the larger of the viewport and its own box: " + wrong);
             });
 
-        // A host requestAnimationFrame that throws on its first call, made
-        // while scrollscrub binds: the page still progresses — the next
-        // scroll publishes the progress. animation_frame's own fallback
-        // carries this; scrollscrub's guard is only defence in depth.
-        scenario(browser, engine, "scrollscrub still publishes progress when the host throws on its first animation frame", null,
-            context -> routeCheckPage(context, "scrub-refused-frame.html", checkPage(
-                "body{min-height:400vh}#rf-scope{margin-top:150vh;height:50vh}",
-                "<script>(function () { var raf = window.requestAnimationFrame, refusals = 1;" +
-                " window.requestAnimationFrame = function (callback) { if (refusals > 0) { refusals -= 1;" +
-                " window.__rfRefused = true; throw new Error('frame refused'); } return raf.call(window, callback); }; }());</script>" +
-                "<section id=\"rf-scope\" data-paste-scrollscrub data-scrub-start=\"top bottom\" data-scrub-end=\"bottom top\"></section>",
-                SEQUENCE_SCRIPTS, null), null),
-            (page, evidence) -> {
-                openCheckPage(page, "scrub-refused-frame.html");
-                active(Boolean.TRUE.equals(page.evaluate("() => window.__rfRefused === true")),
-                    "the host refused the first frame request");
-                page.evaluate("() => window.scrollTo(0, document.getElementById('rf-scope').offsetTop - innerHeight / 2)");
-                boolean published;
-                try {
-                    page.waitForFunction("() => document.getElementById('rf-scope').style.getPropertyValue('--paste-scrub-progress') !== ''",
-                        null, new Page.WaitForFunctionOptions().setTimeout(3000));
-                    published = true;
-                } catch (PlaywrightException timeout) {
-                    published = false;
-                }
-                evidence.put("progress", page.evaluate("() => document.getElementById('rf-scope').style.getPropertyValue('--paste-scrub-progress')"));
-                require(published, "scrollscrub published no progress after the host threw on its first animation frame");
-            });
-
-        // The same throwing first frame on a page with progressiveresolution
-        // alone: the page still progresses — after a resize the 1920 rung
-        // a 160x90 base needs over 1280x720 is fetched and painted.
-        String refusingFrame = "<script>(function () { var raf = window.requestAnimationFrame, refusals = 1;" +
-            " window.requestAnimationFrame = function (callback) { if (refusals > 0) { refusals -= 1;" +
-            " window.__rfRefused = true; throw new Error('frame refused'); } return raf.call(window, callback); }; }());</script>";
-        List<String> refusedResolutionRequests = new ArrayList<>();
-        scenario(browser, engine, "progressiveresolution still upgrades when the host throws on its first animation frame", null,
-            context -> routeCheckPage(context, "resolution-refused-frame.html", checkPage(
-                "#rr-host{width:1280px;height:720px;background:url('/checks/rr-host-160x90.png') center/cover}",
-                refusingFrame + String.format(host, "rr-host", ""),
-                RESOLUTION_SCRIPTS, null), refusedResolutionRequests),
-            (page, evidence) -> {
-                openCheckPage(page, "resolution-refused-frame.html");
-                active(Boolean.TRUE.equals(page.evaluate("() => window.__rfRefused === true")),
-                    "the host refused the first frame request");
-                page.evaluate("() => window.dispatchEvent(new Event('resize'))");
-                boolean upgraded;
-                try {
-                    page.waitForFunction("() => document.getElementById('rr-host').style.backgroundImage.includes('rr-host-1920x1080')",
-                        null, new Page.WaitForFunctionOptions().setTimeout(4000));
-                    upgraded = true;
-                } catch (PlaywrightException timeout) {
-                    upgraded = false;
-                }
-                evidence.put("inline", page.evaluate("() => document.getElementById('rr-host').style.backgroundImage"));
-                evidence.put("requests", List.copyOf(refusedResolutionRequests));
-                require(upgraded, "progressiveresolution never upgraded after the host threw on its first animation frame");
-            });
-
-        // And with imagesequence alone (no scrollscrub, whose bind would
-        // take the throwing first frame): the page still progresses — a
-        // scroll paints a later frame.
-        scenario(browser, engine, "imagesequence still scrubs when the host throws on its first animation frame", null,
-            context -> routeCheckPage(context, "sequence-refused-frame.html", checkPage(
-                ".rs-pad{height:100vh}#rs-band{height:300vh;position:relative}" +
-                "#rs-scene{position:sticky;top:0;height:100vh}" +
-                "#rs-host{display:block;width:640px;height:360px;background-size:cover;" +
-                "background-image:url('/checks/rs-frame-0-320x180.png')}",
-                refusingFrame +
-                "<div class=\"rs-pad\"></div><section id=\"rs-band\"><div id=\"rs-scene\" data-paste-scrollscrub" +
-                " data-scrub-subject=\"#rs-band\" data-scrub-start=\"top top\" data-scrub-end=\"bottom bottom\">" +
-                "<i id=\"rs-host\" data-paste-imagesequence=\"#rs-frames\" data-sequence-from=\"0\" data-sequence-to=\"7\"></i>" +
-                "<script type=\"application/json\" id=\"rs-frames\">" + catalogJson("rs", 8, 320, 180, 0, 0) + "</script>" +
-                "</div></section><div class=\"rs-pad\"></div>",
-                new String[]{"/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/event.js",
-                    "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/utilities/scrollrange.js",
-                    "/js/paste/ui/utilities/imageresolution.js", "/js/paste/ui/utilities/mediaquery.js",
-                    "/js/paste/ui/imagesequence.js"}, null), null),
-            (page, evidence) -> {
-                openCheckPage(page, "sequence-refused-frame.html");
-                active(Boolean.TRUE.equals(page.evaluate("() => window.__rfRefused === true")),
-                    "the host refused the first frame request");
-                String painted = "() => { const v = getComputedStyle(document.getElementById('rs-host')).backgroundImage;" +
-                    " const m = /rs-frame-(\\d+)-/.exec(v); return m ? Number(m[1]) : -1; }";
-                page.evaluate("() => { const b = document.getElementById('rs-band').getBoundingClientRect();" +
-                    " window.scrollTo(0, b.top + scrollY + (b.height - innerHeight) * 0.6); }");
-                boolean scrubbed;
-                try {
-                    page.waitForFunction("() => (" + painted + ")() > 0", null, new Page.WaitForFunctionOptions().setTimeout(4000));
-                    scrubbed = true;
-                } catch (PlaywrightException timeout) {
-                    scrubbed = false;
-                }
-                evidence.put("painted", page.evaluate(painted));
-                require(scrubbed, "imagesequence never scrubbed after the host threw on its first animation frame");
-            });
     }
 
-    // A hero without an id gets a history entry whose address names no
-    // element it does not show, keeps another script's state tokens and
-    // never reads as the bare first entry; the clearance marks only the
-    // hero a hash click scrolled to, so snapping heroes stay aligned; and
-    // a quirks-mode name differing in case takes focus exactly where the
-    // browser made it the target.
-    private static void heroEntryAndQuirksNameRegressions(Browser browser, String engine) {
+    // Native fragment clearance, existing focus behavior and form contracts.
+    private static void sectionnavAndQuirksNameRegressions(Browser browser, String engine) {
         String clearanceRule;
         try {
             String mixin = Files.readString(Path.of("modules/sectionnav/_mixin.scss"));
@@ -4421,148 +3723,19 @@ public final class ElementsBrowserChecks {
         } catch (java.io.IOException error) {
             throw new IllegalStateException(error);
         }
-        String heroChain = "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">one <span id=\"hy-inner\">inner</span></div></section>" +
-            "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">two</div></section>" +
-            "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">three</div></section>" +
-            "<section class=\"paste-ui-hero\"><div class=\"paste-ui-hero-content\">four</div></section>";
-        String heroStyle = "html{scroll-behavior:auto}" + clearanceRule +
-            "#hy-nav{position:fixed;top:0;left:0;right:0;height:51px;background:#fff;z-index:2}#hy-slot{height:51px}" +
-            ".paste-ui-hero{position:relative;height:700px;margin:0}.paste-ui-hero-content{padding:40px}#hy-contact{height:400px}#hy-tail{height:3000px}";
         String heroTop = "n => Math.round(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top)";
 
-        // An address fragment that names an element — another section,
-        // a span inside the hero being left — gives way to the empty
-        // fragment: the address names nothing the entry does not show,
-        // and no engine scrolls to that element on Back or Forward.
-        scenario(browser, engine, "heroscroll entry for a hero without an id names no element it does not show", null,
-            context -> routeCheckPage(context, "hero-entry.html", checkPage(heroStyle,
-                "<div id=\"hy-nav\">nav</div><div id=\"hy-slot\"></div>" + heroChain +
-                "<div id=\"hy-contact\">contact</div><div id=\"hy-tail\">tail</div>",
-                HEROSCROLL_SCRIPTS, null), null),
-            (page, evidence) -> {
-                for (String fragment : List.of("hy-contact", "hy-inner")) {
-                    // A fresh document each time: a fragment-only change of
-                    // address would be a same-document navigation.
-                    page.navigate("about:blank");
-                    Response navigation = page.navigate(url + "checks/hero-entry.html#" + fragment,
-                        new Page.NavigateOptions().setWaitUntil(WaitUntilState.LOAD));
-                    require(navigation != null && navigation.ok(), "regression page hero-entry.html loads");
-                    page.evaluate("() => scrollTo(0, 0)");
-                    page.waitForFunction("() => scrollY === 0");
-                    page.mouse().click(20, 151);
-                    frames(page);
-                    page.mouse().click(20, 151);
-                    frames(page);
-                    Map<?, ?> after = (Map<?, ?>) page.evaluate("() => ({href: location.href, hash: location.hash, y: scrollY})");
-                    evidence.put(fragment + "-afterClicks", after);
-                    active(Math.abs(((Number) page.evaluate(heroTop, 2)).doubleValue() - 51) <= 1, "two hash clicks reached the third hero");
-                    require(String.valueOf(after.get("href")).endsWith("hero-entry.html#") && "".equals(after.get("hash")),
-                        "the entry still names #" + fragment + ", which it does not show: " + after);
-                    List<Object> steps = new ArrayList<>();
-                    String[][] traversal = {{"back", "1"}, {"back", "0"}, {"forward", "1"}, {"forward", "2"}};
-                    for (String[] step : traversal) {
-                        page.evaluate(step[0].equals("back") ? "() => history.back()" : "() => history.forward()");
-                        int hero = Integer.parseInt(step[1]);
-                        // Each hero shows at the clearance: the first in
-                        // flow below the slot, the others by the click.
-                        String expected = "n => Math.abs(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top - 51) <= 1";
-                        try {
-                            page.waitForFunction(expected, hero, new Page.WaitForFunctionOptions().setTimeout(3000));
-                        } catch (PlaywrightException error) {
-                            evidence.put(fragment + "-steps", steps);
-                            require(false, step[0] + " after #" + fragment + " did not return to hero " + (hero + 1) + ": y=" +
-                                page.evaluate("() => scrollY") + " " + page.evaluate("() => location.href"));
-                        }
-                        steps.add(page.evaluate("() => ({hash: location.hash, y: scrollY})"));
-                    }
-                    evidence.put(fragment + "-steps", steps);
-                }
-            });
-
-        // multistate keeps tabs in the fragment and reads an address with no
-        // '#' at all as the bare first entry, where it restores the authored
-        // defaults. The hero's entry keeps a token fragment as it is and an
-        // emptied fragment's '#', so traversal keeps the selection.
-        String[] heroMultistateScripts = {
-            "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
-            "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
-            "/js/paste/polyfills/getcomputedstyle.js",
-            "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/utilities/mediaquery.js",
-            "/js/paste/ui/heroscroll.js", "/js/paste/ui/multistate.js"};
-        scenario(browser, engine, "heroscroll entry for a hero without an id keeps multistate's selection across Back and Forward", null,
-            context -> routeCheckPage(context, "hero-multistate.html", checkPage(heroStyle +
-                "[data-multistate-value]{display:none}[data-multistate-state]{display:inline}",
-                "<div id=\"hy-nav\">" +
-                "<input id=\"hm-a\" type=\"radio\" data-multistate-key=\"area1\" value=\"a\" checked><label for=\"hm-a\">A</label>" +
-                "<input id=\"hm-b\" type=\"radio\" data-multistate-key=\"area1\" value=\"b\"><label for=\"hm-b\">B</label>" +
-                "<input id=\"hm-c\" type=\"radio\" data-multistate-key=\"area1\" value=\"c\"><label for=\"hm-c\">C</label>" +
-                "<span data-multistate-key=\"area1\" data-multistate-value=\"a\">a</span>" +
-                "<span data-multistate-key=\"area1\" data-multistate-value=\"b\">b</span>" +
-                "<span data-multistate-key=\"area1\" data-multistate-value=\"c\">c</span>" +
-                " <a id=\"hm-go\" href=\"#hm-one\">one</a></div><div id=\"hy-slot\"></div>" +
-                heroChain.replaceFirst("<section class=\"paste-ui-hero\"", "<section id=\"hm-one\" class=\"paste-ui-hero\"") +
-                "<div id=\"hy-tail\">tail</div>",
-                heroMultistateScripts, null), null),
-            (page, evidence) -> {
-                String shown = "() => document.querySelector('[data-multistate-key=area1][data-multistate-state]')?.getAttribute('data-multistate-value') ?? null";
-                String settled = "v => document.querySelector('[data-multistate-key=area1][data-multistate-state]')?.getAttribute('data-multistate-value') === v";
-                openCheckPage(page, "hero-multistate.html");
-                page.click("#hm-b");
-                awaitActive(page, "() => decodeURIComponent(location.hash) === '#area1:b'");
-                page.click("#hm-go");
-                page.waitForFunction("() => location.hash === '#hm-one'");
-                frames(page);
-                page.mouse().click(20, 300);
-                frames(page);
-                Map<?, ?> entry = (Map<?, ?>) page.evaluate("() => ({href: location.href, top: document.querySelectorAll('.paste-ui-hero')[1].getBoundingClientRect().top})");
-                evidence.put("heroEntry", entry);
-                require(String.valueOf(entry.get("href")).endsWith("hero-multistate.html#"),
-                    "an emptied fragment must keep its '#': " + entry);
-                page.evaluate("() => history.back()");
-                page.waitForFunction("() => location.hash === '#hm-one'");
-                frames(page);
-                evidence.put("back", page.evaluate(shown));
-                require("b".equals(page.evaluate(shown)), "Back to the link's entry must keep the selection: " + page.evaluate(shown));
-                page.evaluate("() => history.forward()");
-                page.waitForFunction("() => location.hash === '' && location.href.endsWith('#')");
-                frames(page);
-                evidence.put("forward", page.evaluate(shown));
-                require("b".equals(page.evaluate(shown)), "Forward to the hero's entry reset the selection to " + page.evaluate(shown));
-                page.click("#hm-c");
-                page.waitForFunction("() => decodeURIComponent(location.hash) === '#area1:c'");
-                page.evaluate("() => history.back()");
-                page.waitForFunction("() => location.hash === '' && location.href.endsWith('#')");
-                frames(page);
-                evidence.put("backAfterChange", page.evaluate(shown));
-                require("c".equals(page.evaluate(shown)), "Back to the hero's entry reset a later selection to " + page.evaluate(shown));
-
-                // A token fragment is kept on the hero's entry as it is.
-                openCheckPage(page, "hero-multistate.html");
-                page.click("#hm-b");
-                page.waitForFunction("() => decodeURIComponent(location.hash) === '#area1:b'");
-                page.mouse().click(20, 300);
-                frames(page);
-                Map<?, ?> kept = (Map<?, ?>) page.evaluate("() => ({hash: decodeURIComponent(location.hash), length: history.length})");
-                evidence.put("tokenEntry", kept);
-                require("#area1:b".equals(kept.get("hash")), "a multistate token was rewritten on the hero's entry: " + kept);
-                page.evaluate("() => history.back()");
-                page.waitForFunction(settled, "b");
-                page.evaluate("() => history.forward()");
-                page.waitForFunction("n => Math.abs(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top - 51) <= 1", 1);
-                require("b".equals(page.evaluate(shown)), "traversal over a token entry changed the selection: " + page.evaluate(shown));
-            });
-
-        // scroll-margin offsets a scroll-snap area. Only the hero a hash
-        // click scrolled to carries the clearance; the heroes after it
+        // scroll-margin offsets a scroll-snap area. Only the browser's
+        // current fragment target carries the clearance; other heroes
         // keep snapping at the top.
-        scenario(browser, engine, "sectionnav clearance leaves snapping heroes after a hash-click hero aligned", null,
+        scenario(browser, engine, "sectionnav native anchor clearance leaves other snapping heroes aligned", null,
             context -> routeCheckPage(context, "hero-snap.html", checkPage(
                 "html{scroll-snap-type:y mandatory;scroll-behavior:auto}" + clearanceRule +
                 ".paste-ui-hero{height:900px;margin:0;scroll-snap-align:start;box-sizing:border-box}",
-                "<section class=\"paste-ui-hero\" data-hero-hashclick>one</section>" +
-                "<section class=\"paste-ui-hero\" data-hero-hashclick>two</section>" +
+                "<section class=\"paste-ui-hero\" id=\"hs-one\"><a id=\"hs-next\" href=\"#hs-two\">Next section</a></section>" +
+                "<section class=\"paste-ui-hero\" id=\"hs-two\">two</section>" +
                 "<section class=\"paste-ui-hero\">three</section><section class=\"paste-ui-hero\">four</section>",
-                HEROSCROLL_SCRIPTS, null), null),
+                new String[0], null), null),
             (page, evidence) -> {
                 openCheckPage(page, "hero-snap.html");
                 require(!clearanceRule.isEmpty(), "the mixin's clearance rule was not found");
@@ -4572,54 +3745,23 @@ public final class ElementsBrowserChecks {
                 page.waitForTimeout(1000);
                 double snapped = ((Number) page.evaluate(heroTop, 1)).doubleValue();
                 evidence.put("secondHeroSnapped", snapped);
-                require(Math.abs(snapped) <= 1, "a hero after a hash-click hero snapped " + snapped + "px low");
+                require(Math.abs(snapped) <= 1, "an untargeted hero snapped " + snapped + "px low");
                 page.evaluate("() => scrollTo(0, 0)");
                 frames(page);
                 page.waitForTimeout(1000);
-                page.mouse().click(20, 300);
+                page.click("#hs-next");
+                page.waitForFunction("() => location.hash === '#hs-two'");
                 frames(page);
                 page.waitForTimeout(1000);
                 double clicked = ((Number) page.evaluate(heroTop, 1)).doubleValue();
-                evidence.put("secondHeroAfterHashClick", clicked);
-                active(Math.abs(clicked - 51) <= 1, "the hash click's destination lands below the clearance (" + clicked + ")");
+                evidence.put("secondHeroAfterAnchor", clicked);
+                active(Math.abs(clicked - 51) <= 1, "the anchor target lands below the clearance (" + clicked + ")");
                 page.evaluate("() => scrollTo(0, 1700)");
                 frames(page);
                 page.waitForTimeout(1000);
                 double third = ((Number) page.evaluate(heroTop, 2)).doubleValue();
                 evidence.put("thirdHeroSnapped", third);
-                require(Math.abs(third) <= 1, "a hero the click did not reach snapped " + third + "px low");
-            });
-
-        // In a quirks-mode document Chromium and WebKit also take an
-        // <a name> that matches without regard to case, Firefox does not.
-        // Focus follows exactly the element the browser made its target.
-        StringBuilder quirks = new StringBuilder("<html lang=\"en\"><head><meta charset=\"utf-8\"><style>body{margin:0}.gap{height:2000px}</style></head><body>")
-            .append("<nav class=\"paste-ui-section-nav\"><a id=\"fq-go-case\" href=\"#fq-sec\">case</a> <a id=\"fq-go-exact\" href=\"#FQ-Exact\">exact</a></nav>")
-            .append("<input id=\"fq-field\" aria-label=\"Field\"><div class=\"gap\">gap</div><a name=\"FQ-Sec\">sec</a><div class=\"gap\">after</div>")
-            .append("<a name=\"FQ-Exact\">exact</a><div class=\"gap\">after</div>");
-        for (String src : SMOOTHSCROLL_SCRIPTS) {
-            quirks.append("<script src=\"").append(url).append(src, 1, src.length()).append("\"></script>\n");
-        }
-        quirks.append("</body></html>");
-        scenario(browser, engine, "smoothscroll in a quirks-mode document focuses a case-folded name only where the browser targets it", null,
-            context -> routeCheckPage(context, "fragment-quirks.html", quirks.toString(), null),
-            (page, evidence) -> {
-                openCheckPage(page, "fragment-quirks.html");
-                require("BackCompat".equals(page.evaluate("() => document.compatMode")), "precondition: the page is in quirks mode");
-                String state = "() => { const a = document.getElementsByName('FQ-Sec')[0]; return {hash: location.hash," +
-                    " targeted: a.matches(':target'), focused: document.activeElement === a," +
-                    " active: document.activeElement && (document.activeElement.id || document.activeElement.getAttribute('name') || document.activeElement.tagName)}; }";
-                page.focus("#fq-field");
-                page.click("#fq-go-case");
-                page.waitForFunction("() => location.hash === '#fq-sec'");
-                page.waitForTimeout(500);
-                Map<?, ?> folded = (Map<?, ?>) page.evaluate(state);
-                evidence.put("caseFolded", folded);
-                require(Boolean.TRUE.equals(folded.get("targeted")) == Boolean.TRUE.equals(folded.get("focused")),
-                    "focus must follow the browser's own target for a case-folded name: " + folded);
-                page.focus("#fq-field");
-                page.click("#fq-go-exact");
-                awaitActive(page, "() => document.activeElement === document.getElementsByName('FQ-Exact')[0]");
+                require(Math.abs(third) <= 1, "an untargeted hero snapped " + third + "px low");
             });
 
         // form: a native submit encodes in the form's encoding — the first
@@ -4631,7 +3773,7 @@ public final class ElementsBrowserChecks {
         // same page is still taken over, and so is a UTF-16 one, whose
         // background bytes equal its native twin's.
         String[] formCharsetScripts = {"/js/paste/paste.js", "/js/paste/util.js", "/js/paste/guid.js",
-            "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/form.js"};
+            "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/form/form_validity.js", "/js/paste/ui/form/form_html.js"};
         for (String[] variant : List.of(
                 new String[] {"urlencoded post, accept-charset ISO-8859-1", "post", "application/x-www-form-urlencoded", "ISO-8859-1", "utf-8"},
                 new String[] {"get, accept-charset Shift_JIS", "get", "application/x-www-form-urlencoded", "Shift_JIS", "utf-8"},
@@ -4986,307 +4128,360 @@ public final class ElementsBrowserChecks {
     // WebKit also take the first <a name> that matches without regard to
     // case, even ahead of an exact match, and Firefox does not. Each
     // assertion applies where the engine resolved the fragment that way.
-    private static void quirksFragmentRegressions(Browser browser, String engine) {
-        String clearanceRule;
-        try {
-            String mixin = Files.readString(Path.of("modules/sectionnav/_mixin.scss"));
-            Matcher rule = Pattern.compile("(:where\\([^)]*\\))\\s*\\{([^}]*?)#\\{\\$clearance\\}([^}]*)\\}").matcher(mixin);
-            clearanceRule = rule.find() ? rule.group(1) + "{" + rule.group(2) + "51px" + rule.group(3) + "}" : "";
-        } catch (java.io.IOException error) {
-            throw new IllegalStateException(error);
-        }
-        String[] scripts = {
-            "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
-            "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
-            "/js/paste/polyfills/getcomputedstyle.js",
-            "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/utilities/mediaquery.js",
-            "/js/paste/ui/heroscroll.js", "/js/paste/ui/smoothscroll.js"};
-        // No doctype: the document is in quirks mode.
-        java.util.function.BiFunction<String, String, String> quirksPage = (style, body) -> {
-            StringBuilder html = new StringBuilder("<html lang=\"en\"><head><meta charset=\"utf-8\"><style>body{margin:0;font-family:sans-serif}")
-                .append(style).append("</style></head><body>").append(body);
-            for (String src : scripts) {
-                html.append("<script src=\"").append(url).append(src, 1, src.length()).append("\"></script>\n");
-            }
-            return html.append("</body></html>").toString();
+    private static String[] restoredScripts(String name) {
+        String modulePath = switch (name) {
+            case "select" -> "/js/paste/ui/select.js";
+            case "allowed_chars" -> "/js/paste/ui/allowed_chars.js";
+            case "autosave" -> "/js/paste/ui/form/form_autosave.js";
+            case "imageupload" -> "/js/paste/ui/imageupload.js";
+            case "js_tooltip" -> "/js/paste/ui/js_tooltip.js";
+            case "navigate_on_change" -> "/js/paste/ui/navigate_on_change.js";
+            case "prevent_double_submit" -> "/js/paste/ui/prevent_double_submit.js";
+            case "sortable" -> "/js/paste/ui/sortable.js";
+            case "update_text_on_input_change" -> "/js/paste/ui/update_text_on_input_change.js";
+            default -> throw new IllegalArgumentException(name);
         };
-
-        // A hero's own entry empties a fragment the browser resolves to an
-        // anchor by case-folded name, so Back and Forward show the heroes.
-        scenario(browser, engine, "heroscroll entry in a quirks-mode document empties a fragment naming an anchor regardless of case", null,
-            context -> routeCheckPage(context, "hero-quirks.html", quirksPage.apply(
-                "html{scroll-behavior:auto}" + clearanceRule + "#hq-nav{position:fixed;top:0;left:0;right:0;height:51px;background:#fff;z-index:2}" +
-                "#hq-slot{height:51px}.paste-ui-hero{position:relative;height:700px;margin:0}.paste-ui-hero-content{padding:40px}" +
-                ".gap{height:400px}#hq-tail{height:3000px}",
-                "<div id=\"hq-nav\">nav</div><div id=\"hq-slot\"></div>" +
-                "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">one</div></section>" +
-                "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">two</div></section>" +
-                "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">three</div></section>" +
-                "<section class=\"paste-ui-hero\"><div class=\"paste-ui-hero-content\">four</div></section>" +
-                "<div class=\"gap\"><a name=\"HQ-Contact\">contact</a></div><div id=\"hq-tail\">tail</div>"), null),
-            (page, evidence) -> {
-                Response navigation = page.navigate(url + "checks/hero-quirks.html#hq-contact",
-                    new Page.NavigateOptions().setWaitUntil(WaitUntilState.LOAD));
-                require(navigation != null && navigation.ok(), "regression page hero-quirks.html loads");
-                require("BackCompat".equals(page.evaluate("() => document.compatMode")), "precondition: the page is in quirks mode");
-                boolean folds = Boolean.TRUE.equals(page.evaluate("() => document.querySelector(':target') === document.getElementsByName('HQ-Contact')[0]"));
-                evidence.put("engineFoldsNames", folds);
-                page.evaluate("() => scrollTo(0, 0)");
-                page.waitForFunction("() => scrollY === 0");
-                page.mouse().click(20, 151);
-                frames(page);
-                page.mouse().click(20, 151);
-                frames(page);
-                Map<?, ?> after = (Map<?, ?>) page.evaluate("() => ({href: location.href, hash: location.hash, y: scrollY})");
-                evidence.put("afterClicks", after);
-                active(Math.abs(((Number) page.evaluate("() => document.querySelectorAll('.paste-ui-hero')[2].getBoundingClientRect().top")).doubleValue() - 51) <= 1,
-                    "two hash clicks reached the third hero");
-                if (folds) {
-                    require(String.valueOf(after.get("href")).endsWith("hero-quirks.html#") && "".equals(after.get("hash")),
-                        "the entry still names #hq-contact, which this engine resolves to the anchor: " + after);
-                }
-                List<Object> steps = new ArrayList<>();
-                String[][] traversal = {{"back", "1"}, {"back", "0"}, {"forward", "1"}, {"forward", "2"}};
-                for (String[] step : traversal) {
-                    page.evaluate(step[0].equals("back") ? "() => history.back()" : "() => history.forward()");
-                    int hero = Integer.parseInt(step[1]);
-                    try {
-                        page.waitForFunction("n => Math.abs(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top - 51) <= 1",
-                            hero, new Page.WaitForFunctionOptions().setTimeout(3000));
-                    } catch (PlaywrightException error) {
-                        evidence.put("steps", steps);
-                        require(false, step[0] + " did not return to hero " + (hero + 1) + ": y=" +
-                            page.evaluate("() => scrollY") + " " + page.evaluate("() => location.href"));
-                    }
-                    steps.add(page.evaluate("() => ({hash: location.hash, y: scrollY})"));
-                }
-                evidence.put("steps", steps);
-            });
-
-        // The first case-folded anchor comes before the exact one; focus
-        // follows whichever the browser made its :target.
-        scenario(browser, engine, "smoothscroll in a quirks-mode document focuses the browser's target ahead of an exact name", null,
-            context -> routeCheckPage(context, "fragment-quirks-order.html", quirksPage.apply(
-                "html{scroll-behavior:auto}.gap{height:1500px}",
-                "<nav class=\"paste-ui-section-nav\"><a id=\"so-go\" href=\"#so-sec\">sec</a></nav>" +
-                "<input id=\"so-field\" aria-label=\"Field\"><div class=\"gap\"></div><a name=\"SO-SEC\" id=\"so-upper\">upper</a>" +
-                "<div class=\"gap\"></div><a name=\"so-sec\" id=\"so-lower\">lower</a><div class=\"gap\"></div>"), null),
-            (page, evidence) -> {
-                openCheckPage(page, "fragment-quirks-order.html");
-                require("BackCompat".equals(page.evaluate("() => document.compatMode")), "precondition: the page is in quirks mode");
-                page.focus("#so-field");
-                page.click("#so-go");
-                page.waitForFunction("() => location.hash === '#so-sec'");
-                page.waitForTimeout(500);
-                Map<?, ?> state = (Map<?, ?>) page.evaluate("() => { const t = document.querySelector(':target');" +
-                    " return {target: t ? t.id : null, active: document.activeElement && (document.activeElement.id || document.activeElement.tagName)}; }");
-                evidence.put("landed", state);
-                active(state.get("target") != null, "the browser targeted an anchor (" + state.get("target") + ")");
-                require(String.valueOf(state.get("target")).equals(state.get("active")),
-                    "focus must follow the browser's own :target: " + state);
-            });
+        return new String[]{"/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js",
+            "/js/paste/event.js", "/js/paste/io.js", "/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", modulePath};
     }
 
-    // Chromium matches quirks-mode names without regard to case for most
-    // letters: the long s, the Kelvin sign, final sigma, the micro sign and
-    // letters outside the basic plane (Deseret, Adlam) fold with their
-    // letters; the dotless i does not. Firefox and WebKit fold less
-    // or not at all. Focus and the hero entry's address follow what each
-    // engine resolved.
-    private static void quirksCaseFoldRegressions(Browser browser, String engine) {
-        String clearanceRule;
-        try {
-            String mixin = Files.readString(Path.of("modules/sectionnav/_mixin.scss"));
-            Matcher rule = Pattern.compile("(:where\\([^)]*\\))\\s*\\{([^}]*?)#\\{\\$clearance\\}([^}]*)\\}").matcher(mixin);
-            clearanceRule = rule.find() ? rule.group(1) + "{" + rule.group(2) + "51px" + rule.group(3) + "}" : "";
-        } catch (java.io.IOException error) {
-            throw new IllegalStateException(error);
-        }
-        String[] scripts = {
-            "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
-            "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
-            "/js/paste/polyfills/getcomputedstyle.js",
-            "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/utilities/mediaquery.js",
-            "/js/paste/ui/heroscroll.js", "/js/paste/ui/smoothscroll.js"};
-        // No doctype: the document is in quirks mode.
-        java.util.function.BiFunction<String, String, String> quirksPage = (style, body) -> {
-            StringBuilder html = new StringBuilder("<html lang=\"en\"><head><meta charset=\"utf-8\"><style>body{margin:0;font-family:sans-serif}")
-                .append(style).append("</style></head><body>").append(body);
-            for (String src : scripts) {
-                html.append("<script src=\"").append(url).append(src, 1, src.length()).append("\"></script>\n");
-            }
-            return html.append("</body></html>").toString();
-        };
-
-        // {link id, href fragment, anchor name, anchor id}
-        String[][] pairs = {
-            {"qf-go-long", "#QF-SONG", "qf-ſong", "qf-longs"},
-            {"qf-go-kelvin", "#qf-kelvin", "qf-Kelvin", "qf-kelvins"},
-            {"qf-go-sigma", "#qf-Σ", "qf-ς", "qf-sigma"},
-            {"qf-go-micro", "#qf-μ", "qf-µ", "qf-micro"},
-            {"qf-go-deseret", "#qf-\uD801\uDC00x", "qf-\uD801\uDC28x", "qf-deseret"},
-            {"qf-go-adlam", "#qf-\uD83A\uDD00", "qf-\uD83A\uDD22", "qf-adlam"},
-            {"qf-go-dotless", "#qf-I", "qf-ı", "qf-dotless"},
-            {"qf-go-exact", "#qf-exact", "qf-exact", "qf-exacts"}};
-        StringBuilder nav = new StringBuilder("<nav class=\"paste-ui-section-nav\">");
-        StringBuilder anchors = new StringBuilder();
-        for (String[] pair : pairs) {
-            nav.append("<a id=\"").append(pair[0]).append("\" href=\"").append(pair[1]).append("\">").append(pair[0]).append("</a> ");
-            anchors.append("<div class=\"gap\"></div><a name=\"").append(pair[2]).append("\" id=\"").append(pair[3]).append("\">")
-                .append(pair[3]).append("</a>");
-        }
-        nav.append("</nav><input id=\"qf-field\" aria-label=\"Field\">");
-        scenario(browser, engine, "smoothscroll in a quirks-mode document follows the engine's case folding of names", null,
-            context -> routeCheckPage(context, "fragment-quirks-fold.html", quirksPage.apply(
-                "html{scroll-behavior:auto}.gap{height:1200px}", nav + anchors.toString() + "<div class=\"gap\"></div>"), null),
+    private static void restoredChecks(Browser browser, String engine) {
+        scenario(browser, engine, "multistate radio-only states compose with native sibling CSS [restored]", null,
+            context -> routeCheckPage(context, "radio-only.html", checkPage(
+                "#native-radio-a:checked ~ .panel-a,#native-radio-b:checked ~ .panel-b{display:block}.panel-a,.panel-b{display:none}",
+                "<fieldset><legend>View</legend><input id='native-radio-a' name='native-view' type='radio' value='a' data-multistate-key='view' checked><label for='native-radio-a'>A</label><input id='native-radio-b' name='native-view' type='radio' value='b' data-multistate-key='view'><label for='native-radio-b'>B</label><div class='panel-a'>First</div><div class='panel-b'>Second</div></fieldset>",
+                new String[]{"/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js", "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/ui/multistate.js"}, null), null),
             (page, evidence) -> {
-                openCheckPage(page, "fragment-quirks-fold.html");
-                require("BackCompat".equals(page.evaluate("() => document.compatMode")), "precondition: the page is in quirks mode");
-                Map<String, Object> landed = new LinkedHashMap<>();
-                List<String> disagreements = new ArrayList<>();
-                for (String[] pair : pairs) {
-                    page.focus("#qf-field");
-                    String hash = (String) page.evaluate("id => document.getElementById(id).hash", pair[0]);
-                    page.click("#" + pair[0]);
-                    page.waitForFunction("h => location.hash === h", hash);
-                    page.waitForTimeout(400);
-                    Map<?, ?> state = (Map<?, ?>) page.evaluate("() => { const t = document.querySelector(':target');" +
-                        " return {target: t ? t.id : null, active: document.activeElement && (document.activeElement.id || document.activeElement.tagName)}; }");
-                    landed.put(pair[0], state);
-                    Object target = state.get("target");
-                    // With no target, no anchor may hold focus.
-                    boolean agrees = target != null ? target.equals(state.get("active"))
-                        : java.util.Arrays.stream(pairs).noneMatch(other -> other[3].equals(state.get("active")));
-                    if (!agrees) disagreements.add(pair[0]);
-                }
-                evidence.put("landed", landed);
-                require(disagreements.isEmpty(), "focus did not follow the browser's own :target for " + disagreements + ": " + landed);
-                page.focus("#qf-field");
-                page.click("#qf-go-long");
-                page.click("#qf-go-exact");
-                awaitActive(page, "() => document.activeElement === document.getElementById('qf-exacts')");
+                openCheckPage(page, "radio-only.html");
+                active(page.evaluate("() => paste.ui.multistate.getCurrentState().view").equals("a"), "radio-only authored default is registered");
+                page.click("label[for='native-radio-b']");
+                require(page.url().endsWith("#view:b"), "native selection writes its state without marked panels");
+                require(page.locator(".panel-b").isVisible() && !page.locator(".panel-a").isVisible(), "sibling CSS owns presentation");
+                page.goBack();
+                page.waitForFunction("() => document.getElementById('native-radio-a').checked");
+                require(page.locator(".panel-a").isVisible(), "Back restores the native selection");
             });
 
-        // The hero's own entry empties a fragment the engine resolved to an
-        // anchor through case folding, so Back and Forward show heroes.
-        scenario(browser, engine, "heroscroll entry in a quirks-mode document empties a fragment the engine resolves by case folding", null,
-            context -> routeCheckPage(context, "hero-quirks-fold.html", quirksPage.apply(
-                "html{scroll-behavior:auto}" + clearanceRule + "#hf-nav{position:fixed;top:0;left:0;right:0;height:51px;background:#fff;z-index:2}" +
-                "#hf-slot{height:51px}.paste-ui-hero{position:relative;height:700px;margin:0}.paste-ui-hero-content{padding:40px}" +
-                ".gap{height:400px}#hf-tail{height:3000px}",
-                "<div id=\"hf-nav\">nav</div><div id=\"hf-slot\"></div>" +
-                "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">one</div></section>" +
-                "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">two</div></section>" +
-                "<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">three</div></section>" +
-                "<section class=\"paste-ui-hero\"><div class=\"paste-ui-hero-content\">four</div></section>" +
-                "<div class=\"gap\"><a name=\"hf-ſection\" id=\"hf-anchor\">section</a></div><div id=\"hf-tail\">tail</div>"), null),
+        scenario(browser, engine, "multistate native radio and sibling CSS baseline needs no enhancement", null,
+            context -> routeCheckPage(context, "radio-baseline.html", checkPage(
+                ".ms-panel{display:none}#baseline-a:checked ~ .ms-a,#baseline-b:checked ~ .ms-b{display:block}",
+                "<form id='baseline-form'><input id='baseline-a' name='view' type='radio' value='a' checked><label for='baseline-a'>A</label>" +
+                "<input id='baseline-b' name='view' type='radio' value='b'><label for='baseline-b'>B</label>" +
+                "<div class='ms-panel ms-a'>First</div><div class='ms-panel ms-b'>Second</div></form>", new String[]{}, null), null),
             (page, evidence) -> {
-                Response navigation = page.navigate(url + "checks/hero-quirks-fold.html#HF-SECTION",
-                    new Page.NavigateOptions().setWaitUntil(WaitUntilState.LOAD));
-                require(navigation != null && navigation.ok(), "regression page hero-quirks-fold.html loads");
-                require("BackCompat".equals(page.evaluate("() => document.compatMode")), "precondition: the page is in quirks mode");
-                boolean folds = Boolean.TRUE.equals(page.evaluate("() => document.querySelector(':target') === document.getElementById('hf-anchor')"));
-                evidence.put("engineFoldsLongS", folds);
-                page.evaluate("() => scrollTo(0, 0)");
-                page.waitForFunction("() => scrollY === 0");
-                page.mouse().click(20, 151);
-                frames(page);
-                page.mouse().click(20, 151);
-                frames(page);
-                Map<?, ?> after = (Map<?, ?>) page.evaluate("() => ({href: location.href, hash: location.hash, y: scrollY})");
-                evidence.put("afterClicks", after);
-                active(Math.abs(((Number) page.evaluate("() => document.querySelectorAll('.paste-ui-hero')[2].getBoundingClientRect().top")).doubleValue() - 51) <= 1,
-                    "two hash clicks reached the third hero");
-                if (folds) {
-                    require(String.valueOf(after.get("href")).endsWith("hero-quirks-fold.html#") && "".equals(after.get("hash")),
-                        "the entry still names #HF-SECTION, which this engine resolves to the anchor: " + after);
-                }
-                List<Object> steps = new ArrayList<>();
-                String[][] traversal = {{"back", "1"}, {"back", "0"}, {"forward", "1"}, {"forward", "2"}};
-                for (String[] step : traversal) {
-                    page.evaluate(step[0].equals("back") ? "() => history.back()" : "() => history.forward()");
-                    int hero = Integer.parseInt(step[1]);
-                    try {
-                        page.waitForFunction("n => Math.abs(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top - 51) <= 1",
-                            hero, new Page.WaitForFunctionOptions().setTimeout(3000));
-                    } catch (PlaywrightException error) {
-                        evidence.put("steps", steps);
-                        require(false, step[0] + " did not return to hero " + (hero + 1) + ": y=" +
-                            page.evaluate("() => scrollY") + " " + page.evaluate("() => location.href"));
-                    }
-                    steps.add(page.evaluate("() => ({hash: location.hash, y: scrollY})"));
-                }
-                evidence.put("steps", steps);
+                openCheckPage(page, "radio-baseline.html");
+                page.click("label[for='baseline-b']");
+                active(page.locator(".ms-b").isVisible() && !page.locator(".ms-a").isVisible(), "native labels and CSS select the panel");
+                require("b".equals(page.evaluate("() => new FormData(document.getElementById('baseline-form')).get('view')")), "native radio name supplies the form value");
+                page.focus("#baseline-b");
+                page.keyboard().press("ArrowLeft");
+                require(page.locator(".ms-a").isVisible() && !page.locator(".ms-b").isVisible(), "native arrow keys select the panel");
+                require("".equals(page.evaluate("() => location.hash")), "the baseline has no history enhancement");
             });
-    }
 
-    // A name outside the basic plane is one code point in two code units;
-    // Chromium folds it in quirks mode (Deseret capital and small letters),
-    // so the hero's own entry empties a fragment naming it.
-    private static void quirksSurrogateFoldRegressions(Browser browser, String engine) {
-        String clearanceRule;
-        try {
-            String mixin = Files.readString(Path.of("modules/sectionnav/_mixin.scss"));
-            Matcher rule = Pattern.compile("(:where\\([^)]*\\))\\s*\\{([^}]*?)#\\{\\$clearance\\}([^}]*)\\}").matcher(mixin);
-            clearanceRule = rule.find() ? rule.group(1) + "{" + rule.group(2) + "51px" + rule.group(3) + "}" : "";
-        } catch (java.io.IOException error) {
-            throw new IllegalStateException(error);
-        }
-        StringBuilder html = new StringBuilder("<html lang=\"en\"><head><meta charset=\"utf-8\"><style>body{margin:0;font-family:sans-serif}")
-            .append("html{scroll-behavior:auto}").append(clearanceRule)
-            .append("#hd-nav{position:fixed;top:0;left:0;right:0;height:51px;background:#fff;z-index:2}")
-            .append("#hd-slot{height:51px}.paste-ui-hero{position:relative;height:700px;margin:0}.paste-ui-hero-content{padding:40px}")
-            .append(".gap{height:400px}#hd-tail{height:3000px}</style></head><body>")
-            .append("<div id=\"hd-nav\">nav</div><div id=\"hd-slot\"></div>")
-            .append("<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">one</div></section>")
-            .append("<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">two</div></section>")
-            .append("<section class=\"paste-ui-hero\" data-hero-hashclick><div class=\"paste-ui-hero-content\">three</div></section>")
-            .append("<section class=\"paste-ui-hero\"><div class=\"paste-ui-hero-content\">four</div></section>")
-            .append("<div class=\"gap\"><a name=\"hd-𐐨x\" id=\"hd-anchor\">deseret</a></div><div id=\"hd-tail\">tail</div>");
-        for (String src : HEROSCROLL_SCRIPTS) {
-            html.append("<script src=\"").append(url).append(src, 1, src.length()).append("\"></script>\n");
-        }
-        html.append("</body></html>");
-        scenario(browser, engine, "heroscroll entry in a quirks-mode document empties a fragment naming a letter outside the basic plane by case", null,
-            context -> routeCheckPage(context, "hero-quirks-deseret.html", html.toString(), null),
+        scenario(browser, engine, "multistate original grouping, selected-marker CSS and public state", null,
+            context -> routeCheckPage(context, "orig-multistate.html", checkPage(
+                "[data-multistate-value]{display:none}input[data-multistate-key]:checked ~ [data-multistate-state]{display:block}",
+                "<fieldset><input id='orig-a' type='radio' data-multistate-key='view' value='a' checked><label for='orig-a'>A</label>" +
+                "<div id='orig-panel-a' data-multistate-key='view' data-multistate-value='a'>First</div>" +
+                "<input id='orig-b' type='radio' data-multistate-key='view' value='b'><label for='orig-b'>B</label>" +
+                "<div id='orig-panel-b' data-multistate-key='view' data-multistate-value='b'>Second</div></fieldset>" +
+                "<form id='orig-form'><input type='radio' name='period' data-multistate-key='period' value='day' checked>" +
+                "<input type='radio' name='period' data-multistate-key='period' value='week'></form>", MULTISTATE_SCRIPTS,
+                "window.origHashChanges=0; addEventListener('hashchange',()=>origHashChanges++); window.origStates=[];" +
+                "paste.ui.multistate.events.multistatepop.subscribe((e,s)=>origStates.push({same:s===paste.ui.multistate.getCurrentState(),hash:location.hash}));"), null),
             (page, evidence) -> {
-                Response navigation = page.navigate(url + "checks/hero-quirks-deseret.html#HD-%F0%90%90%80X",
-                    new Page.NavigateOptions().setWaitUntil(WaitUntilState.LOAD));
-                require(navigation != null && navigation.ok(), "regression page hero-quirks-deseret.html loads");
-                require("BackCompat".equals(page.evaluate("() => document.compatMode")), "precondition: the page is in quirks mode");
-                boolean folds = Boolean.TRUE.equals(page.evaluate("() => document.querySelector(':target') === document.getElementById('hd-anchor')"));
-                evidence.put("engineFoldsDeseret", folds);
-                page.evaluate("() => scrollTo(0, 0)");
-                page.waitForFunction("() => scrollY === 0");
-                page.mouse().click(20, 151);
-                frames(page);
-                page.mouse().click(20, 151);
-                frames(page);
-                Map<?, ?> after = (Map<?, ?>) page.evaluate("() => ({href: location.href, hash: location.hash, y: scrollY})");
-                evidence.put("afterClicks", after);
-                active(Math.abs(((Number) page.evaluate("() => document.querySelectorAll('.paste-ui-hero')[2].getBoundingClientRect().top")).doubleValue() - 51) <= 1,
-                    "two hash clicks reached the third hero");
-                if (folds) {
-                    require(String.valueOf(after.get("href")).endsWith("hero-quirks-deseret.html#") && "".equals(after.get("hash")),
-                        "the entry still names a fragment this engine resolves to the anchor: " + after);
-                }
-                List<Object> steps = new ArrayList<>();
-                String[][] traversal = {{"back", "1"}, {"back", "0"}, {"forward", "1"}, {"forward", "2"}};
-                for (String[] step : traversal) {
-                    page.evaluate(step[0].equals("back") ? "() => history.back()" : "() => history.forward()");
-                    int hero = Integer.parseInt(step[1]);
-                    try {
-                        page.waitForFunction("n => Math.abs(document.querySelectorAll('.paste-ui-hero')[n].getBoundingClientRect().top - 51) <= 1",
-                            hero, new Page.WaitForFunctionOptions().setTimeout(3000));
-                    } catch (PlaywrightException error) {
-                        evidence.put("steps", steps);
-                        require(false, step[0] + " did not return to hero " + (hero + 1) + ": y=" +
-                            page.evaluate("() => scrollY") + " " + page.evaluate("() => location.href"));
-                    }
-                    steps.add(page.evaluate("() => ({hash: location.hash, y: scrollY})"));
-                }
-                evidence.put("steps", steps);
+                openCheckPage(page, "orig-multistate.html");
+                active(page.locator("#orig-panel-a").isVisible(), "the initial selected marker reveals the panel");
+                require((Boolean) page.evaluate("() => document.getElementById('orig-a').name === document.getElementById('orig-b').name && /view\\$/.test(document.getElementById('orig-a').name)"), "unnamed radios get one native group");
+                require((Boolean) page.evaluate("() => Array.from(document.querySelectorAll('#orig-form input')).every(r=>r.name==='period' && r.id)"), "authored names survive and missing ids are supplied");
+                page.click("label[for='orig-b']");
+                require(page.locator("#orig-panel-b").isVisible() && !page.locator("#orig-panel-a").isVisible(), "original sibling CSS follows the changed marker");
+                require((Boolean) page.evaluate("() => origStates.length===1 && origStates[0].same && origStates[0].hash.includes('view:b') && origHashChanges===0"), "pushState precedes the shared payload and causes no hashchange");
+                require("day".equals(page.evaluate("() => new FormData(document.getElementById('orig-form')).get('period')")), "authored native form values remain intact");
+                page.goBack();
+                page.waitForFunction("() => document.getElementById('orig-a').checked");
+                require(page.locator("#orig-panel-a").isVisible(), "Back restores the initial selection");
+                page.goForward();
+                page.waitForFunction("() => document.getElementById('orig-b').checked");
+                page.focus("#orig-b"); page.keyboard().press("ArrowLeft");
+                require(page.locator("#orig-panel-a").isVisible(), "native arrow keys drive the same enhancement");
             });
+
+        scenario(browser, engine, "multistate rescan releases old reflection and partial history clears omitted keys", null,
+            context -> routeCheckPage(context, "orig-rescan.html", multistatePage("", null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "orig-rescan.html");
+                page.click("#ms-a1b");
+                active("b".equals(page.evaluate("() => paste.ui.multistate.getCurrentState().area1")), "a radio change selects B");
+                page.evaluate("() => location.hash='area1:a'");
+                page.waitForFunction("() => paste.ui.multistate.getCurrentState().area1==='a' && !('area2' in paste.ui.multistate.getCurrentState())");
+                require((Boolean) page.evaluate("() => !document.querySelector('input[data-multistate-key=area2]:checked') && !document.querySelector('[data-multistate-key=area2][data-multistate-state]')"), "omitted keys lose both radio selection and panel reflection");
+                page.evaluate("() => { document.querySelectorAll('[data-multistate-key=area2]').forEach(e=>e.remove()); paste.ui.multistate.initialize(true); paste.ui.multistate.initialize(true); }");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#ms-a1b");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "repeat rescans do not duplicate change listeners");
+                require((Boolean) page.evaluate("() => !('area2' in paste.ui.multistate.getCurrentState())"), "removed declarations leave the state table");
+            });
+
+        scenario(browser, engine, "select keeps native choice and reflects its label [restored]", null,
+            context -> routeCheckPage(context, "select.html", checkPage("",
+                "<form id='selection'><select id='choice' name='choice' data-paste-select><option value='a'>First</option><option value='b' label='Second'>Internal</option></select>\n<span id='choice-text' data-paste-select-value aria-hidden='true'></span><button type='reset'>Reset</button></form>",
+                restoredScripts("select"), null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "select.html");
+                active(page.textContent("#choice-text").equals("First"), "initial selection is reflected");
+                page.selectOption("#choice", "b");
+                require(page.textContent("#choice-text").equals("Second"), "visible option label is reflected");
+                require(page.evaluate("() => new FormData(document.getElementById('selection')).get('choice')").equals("b"), "native form value is unchanged");
+                page.click("button");
+                page.waitForFunction("() => document.getElementById('choice-text').textContent === 'First'");
+                require(page.inputValue("#choice").equals("a"), "native reset restores selection and label");
+            });
+
+        scenario(browser, engine, "allowed_chars restores typed filtering without taking over editing [restored]", null,
+            context -> routeCheckPage(context, "allowed-chars.html", checkPage("",
+                "<input id='digits' data-allowed-char-expr='[0-9]' data-disallowed-char-expr='5'>" +
+                "<input id='broken' data-allowed-char-expr='['>", restoredScripts("allowed_chars"), null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "allowed-chars.html");
+                page.locator("#digits").pressSequentially("a1256");
+                active(page.inputValue("#digits").equals("126"), "allow and deny expressions filter actual keypresses");
+                page.press("#digits", "Backspace");
+                require(page.inputValue("#digits").equals("12"), "native deletion remains available");
+                page.locator("#broken").pressSequentially("abc");
+                require(page.inputValue("#broken").equals("abc"), "malformed authored regex leaves native editing intact");
+                page.evaluate("() => {digits.setAttribute('data-allowed-char-expr','[a-z]');paste.ui.allowed_chars.initialize(true);paste.ui.allowed_chars.initialize();}");
+                page.press("#digits", "End");
+                page.locator("#digits").pressSequentially("3z");
+                require(page.inputValue("#digits").equals("12z"), "forced initialization replaces the old filter");
+                page.fill("#digits", "pasted value");
+                require(page.inputValue("#digits").equals("pasted value"), "filter does not claim to sanitize paste or programmatic input");
+            });
+        scenario(browser, engine, "navigate_on_change restores browser navigation and history from an opted-in select [restored]", null,
+            context -> routeCheckPage(context, "navigate-change.html", checkPage("",
+                "<select id='destination' data-navigate-on-change='true'><option value=''>Choose</option><option value='#details'>Details</option></select>" +
+                "<section id='details'>Details</section>", restoredScripts("navigate_on_change"),
+                "window.hashEvents=0;addEventListener('hashchange',()=>hashEvents++);"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "navigate-change.html");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.selectOption("#destination", "#details");
+                awaitActive(page, "() => location.hash === '#details' && hashEvents === 1");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "native navigation creates one history entry");
+                page.goBack();
+                page.waitForFunction("() => location.hash === ''");
+                require(page.inputValue("#destination").equals("#details"), "back does not invent a parallel selection model");
+            });
+        scenario(browser, engine, "prevent_double_submit preserves the native submitter and releases canceled submissions [restored]", null,
+            context -> routeCheckPage(context, "double-submit.html", checkPage("",
+                "<iframe name='receipt'></iframe><form id='order' action='/native-receipt' target='receipt'>" +
+                "<input name='item' value='book' required><button id='buy' name='operation' value='buy' data-prevent-double-submit='true'>Buy</button>" +
+                "<button id='disabled' disabled data-prevent-double-submit='true'>Disabled</button></form>" +
+                "<dialog id='receipt-dialog'><form id='dialog-form' method='dialog'>" +
+                "<button id='dialog-accept' data-prevent-double-submit='true'>Done</button></form></dialog>",
+                restoredScripts("prevent_double_submit"), null), null),
+            (page, evidence) -> {
+                List<String> requests = new ArrayList<>();
+                page.route("**/native-receipt**", route -> {
+                    requests.add(route.request().url());
+                    route.fulfill(new Route.FulfillOptions().setContentType("text/html").setBody("received"));
+                });
+                openCheckPage(page, "double-submit.html");
+                page.evaluate("() => {order.requestSubmit(buy);order.requestSubmit(buy);}");
+                page.waitForFunction("() => buy.disabled");
+                page.waitForTimeout(100);
+                active(requests.size() == 1 && requests.get(0).contains("operation=buy"), "one native request retains the initiating submitter's value");
+                page.evaluate("() => order.reset()");
+                page.waitForFunction("() => !buy.disabled");
+                require((Boolean) page.evaluate("() => disabled.disabled"), "release does not enable a control disabled by its author");
+                page.evaluate("() => {order.addEventListener('submit',e=>e.preventDefault(),{once:true});order.requestSubmit(buy);}");
+                page.waitForTimeout(30);
+                require(!(Boolean) page.evaluate("() => buy.disabled"), "a canceled submission does not strand the control");
+                page.click("#buy");
+                page.waitForFunction("() => buy.disabled");
+                page.waitForTimeout(100);
+                require(requests.size() == 2, "a canceled submission permits a later native attempt");
+                page.evaluate("() => dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}))");
+                require(!(Boolean) page.evaluate("() => buy.disabled"), "pageshow releases the navigation lock");
+                for (boolean override : new boolean[]{false, true}) {
+                    page.evaluate("override => {const form=document.getElementById('dialog-form');" +
+                        "const button=document.getElementById('dialog-accept');" +
+                        "form.method=override?'get':'dialog'; if(override)button.setAttribute('formmethod','dialog');" +
+                        "document.getElementById('receipt-dialog').showModal();}", override);
+                    page.click("#dialog-accept");
+                    page.waitForTimeout(30);
+                    require((Boolean) page.evaluate("() => !document.getElementById('receipt-dialog').open &&" +
+                        " !document.getElementById('dialog-accept').disabled"),
+                        "dialog submission closes without a navigation lock, override=" + override);
+                }
+                evidence.put("requests", requests);
+            });
+        scenario(browser, engine, "update_text_on_input_change preserves markup and inserts values only as text [restored]", null,
+            context -> routeCheckPage(context, "update-text.html", checkPage("",
+                "<input id='person' value='Ada' data-update-variable-name='name' data-update-variable-default='Guest'>" +
+                "<input id='agree' type='checkbox' checked value='yes' data-update-variable-name='consent' data-update-variable-default='no'>" +
+                "<p id='message' data-update-variable-names='name,consent'><b id='prefix'>Hello</b> %(name)s: %(consent)s</p>",
+                restoredScripts("update_text_on_input_change"), "window.keptPrefix=document.getElementById('prefix');"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "update-text.html");
+                active(page.textContent("#message").equals("Hello Ada: yes"), "initial native input values render into placeholders");
+                page.fill("#person", "<img src=x onerror=alert(1)>");
+                require(page.textContent("#message").contains("<img src=x onerror=alert(1)>"), "input HTML is displayed literally");
+                require(page.locator("#message img").count() == 0, "input cannot inject markup");
+                require((Boolean) page.evaluate("() => document.getElementById('prefix') === keptPrefix"), "authored nodes keep their identity");
+                page.uncheck("#agree");
+                require(page.textContent("#message").endsWith(": no"), "unchecked checkboxes clear the previous value");
+                page.evaluate("() => {paste.ui.update_text_on_input_change.setVariable('name',0);paste.ui.update_text_on_input_change.updateOutputs();paste.ui.update_text_on_input_change.init();}");
+                require(page.textContent("#message").equals("Hello 0: no"), "zero is a value and repeated init does not restore stale markup");
+            });
+        scenario(browser, engine, "js_tooltip restores rich content for focus and hover with owned descriptions [restored]", null,
+            context -> routeCheckPage(context, "tooltip.html", checkPage("button{margin:100px}.ui-js-tooltip{position:fixed}",
+                "<span id='help'>Existing help</span><button id='tip' aria-describedby='help' data-ui-js-tooltip='heading=&lt;b&gt;Title&lt;/b&gt;|body=A=B'><span>Trigger</span></button>",
+                restoredScripts("js_tooltip"), null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "tooltip.html");
+                page.focus("#tip");
+                active(page.locator(".ui-js-tooltip b").textContent().equals("Title"), "keyboard focus exposes authored rich content");
+                require(page.locator(".ui-js-tooltip .body").textContent().equals("A=B"), "content can contain an equals sign");
+                require(page.getAttribute("#tip", "aria-describedby").startsWith("help "), "existing description tokens are retained");
+                page.press("#tip", "Escape");
+                require(page.locator(".ui-js-tooltip").count() == 0, "Escape dismisses the tooltip");
+                require(page.getAttribute("#tip", "aria-describedby").equals("help"), "dismissal removes only the owned description");
+                page.evaluate("() => document.activeElement.blur()");
+                page.hover("#tip span");
+                active(page.locator(".ui-js-tooltip").count() == 1, "hovering a descendant uses its declared trigger");
+                page.mouse().move(0, 0);
+                require(page.locator(".ui-js-tooltip").count() == 0, "leaving the trigger removes the hover tooltip");
+            });
+        scenario(browser, engine, "sortable swaps live slot contents while preserving structural fields and callbacks [restored]", null,
+            context -> routeCheckPage(context, "sortable.html", checkPage(".paste-ui-sortable{display:inline-block;width:180px;padding:20px}[draggable]{padding:20px}",
+                "<div id='sort' data-paste-sortable><div class='paste-ui-sortable'><input id='order1' value='1'><div id='slot1' draggable='true'><button id='kept'>First</button></div></div>" +
+                "<div class='paste-ui-sortable'><input id='order2' value='2'><div id='slot2' draggable='true'><input id='moving' value='Second'></div></div></div>",
+                restoredScripts("sortable"), "window.clicks=0;window.callbacks=[];window.keptButton=kept;kept.addEventListener('click',()=>clicks++);paste.ui.sortable.bind(sort,{dragStart:function(parent,block){callbacks.push([this.id,parent.id,block.className])},dragEnd:function(){callbacks.push(['end',this.id])}});"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "sortable.html");
+                page.fill("#moving", "edited");
+                page.dragAndDrop("#slot1", "#slot2");
+                active(page.locator("#slot2 #kept").count() == 1, "native drag swaps the slot contents");
+                require(page.locator("#slot1 #moving").inputValue().equals("edited"), "live input state survives the swap");
+                require(page.inputValue("#order1").equals("1") && page.inputValue("#order2").equals("2"), "structural order fields remain in place");
+                page.click("#kept");
+                require((Boolean) page.evaluate("() => kept === keptButton && clicks === 1"), "node identity and attached listeners survive");
+                require((Boolean) page.evaluate("() => callbacks[0][0]==='slot1' && callbacks[0][1]==='sort' && callbacks[1][0]==='end'"), "callbacks retain the original context and arguments after declarative binding");
+                require(page.locator(".dragging,.over").count() == 0, "drag end releases state classes");
+            });
+        scenario(browser, engine, "autosave acknowledges sent values and retains edits made during a request [restored]", null,
+            context -> routeCheckPage(context, "autosave.html", checkPage("",
+                "<form id='draft' action='/save-native' data-ui-autosave='title' data-autosave-action='/save-draft'><input id='title' name='title' value='before'><input name='csrf' value='token'></form>" +
+                "<div id='reply' data-update-contents='summary'></div><span id='stamp' data-update-attribute='data-version=revision'></span>",
+                restoredScripts("autosave"), null), null),
+            (page, evidence) -> {
+                List<Route> requests = new ArrayList<>();
+                page.route("**/save-draft", requests::add);
+                openCheckPage(page, "autosave.html");
+                page.fill("#title", "first");
+                page.waitForTimeout(80);
+                active(requests.size() == 1 && page.getAttribute("#draft", "class").contains("autosaving"), "first edit starts an autosave request");
+                require(requests.get(0).request().postData().contains("token"), "native FormData includes unmonitored successful fields");
+                page.fill("#title", "second");
+                page.waitForTimeout(30);
+                require(requests.size() == 1, "edits cannot start an overlapping request");
+                requests.get(0).fulfill(new Route.FulfillOptions().setContentType("application/json").setBody("{\"meta\":{\"code\":200},\"data\":{\"modules\":{\"summary\":{\"markup\":\"<b>Saved first</b>\"}},\"variables\":{\"revision\":\"1\"}}}"));
+                page.waitForFunction("() => draft.classList.contains('not-autosaving')");
+                require((Boolean) page.evaluate("() => draft.classList.contains('not-autosaved')"), "acknowledging the first edit does not mark the second edit saved");
+                require(page.textContent("#reply").equals("Saved first") && page.getAttribute("#stamp", "data-version").equals("1"), "original modules and variables reply hooks still apply");
+                page.evaluate("() => title.dispatchEvent(new Event('change',{bubbles:true}))");
+                page.waitForTimeout(60);
+                require(requests.size() == 2, "change immediately flushes the pending typing window");
+                requests.get(1).fulfill(new Route.FulfillOptions().setContentType("application/json").setBody("{\"meta\":{\"code\":200},\"data\":{}}"));
+                page.waitForFunction("() => !draft.classList.contains('not-autosaved') && draft.classList.contains('not-autosaving')");
+                page.evaluate("() => {paste.ui.form.form_autosave.init();title.dispatchEvent(new Event('change',{bubbles:true}));}");
+                page.waitForTimeout(50);
+                require(requests.size() == 2, "unchanged values and repeated init send no duplicate request");
+                double started = ((Number) page.evaluate("() => performance.now()")).doubleValue();
+                page.waitForRequest(url + "save-draft", new Page.WaitForRequestOptions().setTimeout(15000), () -> {
+                    page.fill("#title", "third");
+                    page.waitForTimeout(8000);
+                    require(requests.size() == 2, "later typing waits for the original ten-second window");
+                    page.fill("#title", "fourth");
+                });
+                double elapsed = ((Number) page.evaluate("() => performance.now()")).doubleValue() - started;
+                require(elapsed >= 9900 && elapsed < 15000, "later input does not reset the fixed window: " + elapsed);
+                page.waitForCondition(() -> requests.size() == 3);
+                require(requests.get(2).request().postData().contains("fourth"), "the window sends the current native values");
+                requests.get(2).fulfill(new Route.FulfillOptions().setContentType("application/json").setBody("{\"meta\":{\"code\":500},\"data\":{}}"));
+                page.waitForFunction("() => draft.classList.contains('not-autosaving') && draft.classList.contains('not-autosaved')");
+                page.waitForRequest(url + "save-draft", () -> page.evaluate("() => title.dispatchEvent(new Event('change',{bubbles:true}))"));
+                page.waitForCondition(() -> requests.size() == 4);
+                requests.get(3).fulfill(new Route.FulfillOptions().setContentType("application/json").setBody("{\"meta\":{\"code\":200},\"data\":{}}"));
+                page.waitForFunction("() => !draft.classList.contains('not-autosaved')");
+                evidence.put("typingWindowMs", elapsed);
+            });
+        scenario(browser, engine, "imageupload restores paired URI changes and clears busy after success or failure [restored]", null,
+            context -> routeCheckPage(context, "imageupload.html", checkPage("",
+                "<form id='photoform'><input id='photo' type='file' name='photo' data-image-upload-action='/upload-photo'>" +
+                "<input id='uri' type='hidden' name='uri' data-image-upload-uri data-image-upload-for='photo'>" +
+                "<img id='preview' alt='Preview' data-image-upload-preview data-image-upload-for='photo' data-image-url-prefix='/checks/'>" +
+                "<span id='upload-message' data-image-upload-message data-image-upload-for='photo'></span></form>",
+                restoredScripts("imageupload"), "window.uriChanges=0;uri.addEventListener('change',()=>uriChanges++);"), null),
+            (page, evidence) -> {
+                List<Route> requests = new ArrayList<>();
+                page.route("**/upload-photo", requests::add);
+                openCheckPage(page, "imageupload.html");
+                page.locator("#photo").setInputFiles(new com.microsoft.playwright.options.FilePayload("photo.png", "image/png", new byte[]{1,2,3}));
+                page.waitForTimeout(60);
+                active(requests.size() == 1 && page.getAttribute("#photo", "data-image-upload-loading") != null, "selection starts one upload and exposes its pending state");
+                require("image-upload-loading".equals(page.getAttribute("#photo", "data-image-upload-loading")) &&
+                    "image-upload-loading".equals(page.getAttribute("#upload-message", "data-image-upload-loading")),
+                    "both hooks retain the original attribute value for authored CSS");
+                page.evaluate("() => uri.dispatchEvent(new Event('change',{bubbles:true}))");
+                require(page.getAttribute("#photo", "data-image-upload-loading") != null,
+                    "an unchanged preview cannot clear a pending upload");
+                Response uploaded = page.waitForResponse(response -> response.request().resourceType().equals("xhr"),
+                    () -> requests.get(0).resume(new Route.ResumeOptions().setUrl(url + "checks/echo-upload")));
+                JsonObject wire = JsonParser.parseString(uploaded.text()).getAsJsonObject().getAsJsonObject("wire");
+                require(wire.get("body").getAsString().contains("filename=\"photo.png\""),
+                    "native multipart carries the chosen file to the actual HTTP receiver");
+                require(wire.get("contentType").getAsString().startsWith("multipart/form-data;"),
+                    "browser supplies the multipart boundary");
+                page.waitForFunction("() => uri.value === 'photo-20x20.png' && !photo.hasAttribute('data-image-upload-loading')");
+                require(((Number) page.evaluate("() => uriChanges")).intValue() == 2, "success adds one paired URI change");
+                require(page.getAttribute("#preview", "src").equals("/checks/photo-20x20.png"), "preview resolves the authored URL prefix");
+                page.locator("#photo").setInputFiles(new com.microsoft.playwright.options.FilePayload("bad.png", "image/png", new byte[]{4}));
+                page.waitForTimeout(60);
+                requests.get(1).fulfill(new Route.FulfillOptions().setContentType("application/json").setBody("{\"meta\":{\"code\":400,\"error_detail\":\"Rejected\"}}"));
+                page.waitForFunction("() => !photo.hasAttribute('data-image-upload-loading') && uri.value === ''");
+                require(page.getAttribute("#upload-message", "data-image-upload-error-message").equals("Rejected"), "server rejection is reflected in the original error hook");
+                require(((Number) page.evaluate("() => uriChanges")).intValue() == 3, "failure clears and announces the paired URI");
+            });
+        for (boolean guardFirst : new boolean[]{true, false}) {
+            scenario(browser, engine, "prevent_double_submit composes with form request ownership [restored] guardFirst=" + guardFirst, null,
+                context -> {
+                    List<String> scripts = new ArrayList<>(List.of(restoredScripts("prevent_double_submit")));
+                    scripts.addAll(guardFirst ? scripts.size() : scripts.size() - 1, List.of("/js/paste/ui/form/form_validity.js", "/js/paste/ui/form/form_html.js"));
+                    routeCheckPage(context, "composed-forms.html", checkPage("",
+                        "<div id='target' class='account-panel' data-paste-io-reply-fragment-target><form id='composed' method='post' action='/background-save' data-paste-form>" +
+                        "<input name='name' value='Ada'><button id='submit' name='operation' value='save' data-prevent-double-submit='true'>Save</button></form></div>",
+                        scripts.toArray(String[]::new), null), null);
+                },
+                (page, evidence) -> {
+                    List<Route> requests = new ArrayList<>();
+                    page.route("**/background-save", requests::add);
+                    openCheckPage(page, "composed-forms.html");
+                    page.waitForRequest(url + "background-save", () -> page.evaluate("() => {composed.requestSubmit(document.getElementById('submit'));composed.requestSubmit(document.getElementById('submit'));}"));
+                    page.waitForCondition(() -> requests.size() == 1);
+                    page.waitForFunction("() => target.classList.contains('paste-ui-formhtml-busy')");
+                    page.waitForTimeout(30);
+                    active(requests.size() == 1, "background target reservation prevents duplicate transmission");
+                    require(!(Boolean) page.evaluate("() => document.getElementById('submit').disabled"), "native guard does not acquire a canceled background submit");
+                    require(requests.get(0).request().postData().contains("operation=save"), "background submitter payload remains intact");
+                    requests.get(0).fulfill(new Route.FulfillOptions().setContentType("text/html").setBody("<p>Saved</p>"));
+                    page.waitForFunction("() => target.textContent==='Saved'");
+                    require(page.getAttribute("#target", "class").equals("account-panel"), "reply settlement releases only the owned busy class");
+                    require(page.getAttribute("#target", "aria-busy") == null, "reply settlement releases aria-busy");
+                });
+        }
     }
 
     private static void runBrowser(Playwright playwright, String engine) {
@@ -5296,13 +4491,25 @@ public final class ElementsBrowserChecks {
             case "webkit" -> playwright.webkit();
             default -> throw new IllegalArgumentException("Unknown browser engine: " + engine);
         };
-        BrowserType.LaunchOptions launch = new BrowserType.LaunchOptions().setHeadless(true);
+        BrowserType.LaunchOptions launch = new BrowserType.LaunchOptions().setHeadless(true)
+            .setProxy(new com.microsoft.playwright.options.Proxy("http://127.0.0.1:9").setBypass("127.0.0.1,localhost"));
+        if (engine.equals("firefox")) {
+            launch.setFirefoxUserPrefs(Map.ofEntries(
+                Map.entry("extensions.pocket.enabled", false),
+                Map.entry("browser.newtabpage.activity-stream.feeds.system.topstories", false),
+                Map.entry("browser.newtabpage.activity-stream.feeds.section.topstories", false),
+                Map.entry("browser.newtabpage.enabled", false), Map.entry("network.proxy.type", 1),
+                Map.entry("network.proxy.http", "127.0.0.1"), Map.entry("network.proxy.http_port", 9),
+                Map.entry("network.proxy.ssl", "127.0.0.1"), Map.entry("network.proxy.ssl_port", 9),
+                Map.entry("network.proxy.no_proxies_on", "localhost,127.0.0.1")));
+        }
         String executable = System.getenv("ELEMENTS_CHROMIUM_EXECUTABLE");
         if (engine.equals("chromium") && executable != null && !executable.isBlank()) {
             launch.setExecutablePath(Path.of(executable));
         }
         try (Browser browser = type.launch(launch)) {
             System.out.println("BROWSER " + engine + " " + browser.version());
+            restoredChecks(browser, engine);
 
             scenario(browser, engine, "the fixture host refuses every undeclared path", null, (page, evidence) -> {
                 active(page.request().get(url + "examples/reading.html").ok(), "a declared fixture path is served");
@@ -5394,10 +4601,16 @@ public final class ElementsBrowserChecks {
                 List<Map<String, Object>> frames = new ArrayList<>();
                 for (double fraction : new double[]{0.3, 0.45, 0.6}) {
                     scrollTo(page, fraction);
-                    page.waitForTimeout(150);
+                    // Publish the new scroll position, then await the decoded
+                    // frame; the module promises no fixed 150 ms load time.
+                    page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
                     double progress = property(page, "#press-hero");
-                    int painted = paintedFrameIndex(page, "#press-host");
                     int expected = expectedIndex(11, 3, progress);
+                    awaitActive(page, "([selector, expected]) => { const match = /frame-(\\d+)\\.png/.exec(" +
+                        "getComputedStyle(document.querySelector(selector)).backgroundImage);" +
+                        "return match && Number(match[1]) === expected; }", List.of("#press-host", expected),
+                        new Page.WaitForFunctionOptions().setTimeout(6000));
+                    int painted = paintedFrameIndex(page, "#press-host");
                     frames.add(Map.of("fraction", fraction, "progress", progress, "painted", painted, "expected", expected));
                     require(painted == expected,
                         "press painted frame " + painted + " but the declaration expects " + expected + " at progress " + progress);
@@ -5405,10 +4618,14 @@ public final class ElementsBrowserChecks {
                 evidence.put("pressFrames", frames);
                 // The hall sequence plays the forward direction.
                 scrollTo(page, 0.85);
-                page.waitForTimeout(150);
+                page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
                 double hallProgress = property(page, "#hall-hero");
-                int hallPainted = paintedFrameIndex(page, "#hall-host");
                 int hallExpected = expectedIndex(0, 15, hallProgress);
+                awaitActive(page, "([selector, expected]) => { const match = /frame-(\\d+)\\.png/.exec(" +
+                    "getComputedStyle(document.querySelector(selector)).backgroundImage);" +
+                    "return match && Number(match[1]) === expected; }", List.of("#hall-host", hallExpected),
+                    new Page.WaitForFunctionOptions().setTimeout(6000));
+                int hallPainted = paintedFrameIndex(page, "#hall-host");
                 evidence.put("hall", Map.of("progress", hallProgress, "painted", hallPainted, "expected", hallExpected));
                 require(hallPainted == hallExpected,
                     "hall painted frame " + hallPainted + " but the declaration expects " + hallExpected + " at progress " + hallProgress);
@@ -5469,7 +4686,10 @@ public final class ElementsBrowserChecks {
                 Response navigation = page.navigate(url + "examples/avatars.html",
                     new Page.NavigateOptions().setWaitUntil(WaitUntilState.LOAD));
                 require(navigation != null && navigation.ok(), "avatars fixture loads");
-                page.waitForTimeout(400);
+                // Image preparation and decode finish asynchronously; a fixed
+                // delay measures machine load rather than the required result.
+                awaitActive(page, "() => /r[12]\\.png$/.test(document.getElementById('avatar').currentSrc) && " +
+                    "document.getElementById('product').currentSrc.endsWith('/r1.png')");
                 Map<String, String> srcs = new LinkedHashMap<>();
                 for (String id : List.of("avatar", "product", "wide")) {
                     srcs.put(id, (String) page.evaluate(
@@ -5642,13 +4862,9 @@ public final class ElementsBrowserChecks {
             progressiveresolutionBoxAndNearnessRegressions(browser, engine);
             progressiveresolutionAttachmentRegressions(browser, engine);
             fragmentFocusAndHeroLandingRegressions(browser, engine);
-            heroEntryAndQuirksNameRegressions(browser, engine);
-            quirksFragmentRegressions(browser, engine);
-            quirksCaseFoldRegressions(browser, engine);
-            quirksSurrogateFoldRegressions(browser, engine);
+            sectionnavAndQuirksNameRegressions(browser, engine);
             imagesequenceLeaseAndLoadRegressions(browser, engine);
-            animationFramePageWrapperRegressions(browser, engine);
-            animationFrameDoubleCarrierRegressions(browser, engine);
+            animationFrameNativeChecks(browser, engine);
 
             // The documented examples and their disabled-module controls run
             // on every engine: nothing in them depends on a Chromium-only
@@ -5844,128 +5060,19 @@ public final class ElementsBrowserChecks {
         }
     }
 
-    // animation-frame under a page's own requestAnimationFrame wrapper,
-    // installed before paste loads: one that calls back with no time,
-    // and a synchronous "flush" helper that calls back inside the call
-    // and returns an id of its own. Twelve chained batches must each run
-    // after request() returns, on the performance.now() clock, strictly
-    // later than the one before and spread over real time.
-    private static final String[] ANIMATION_FRAME_WRAPPER_SCRIPTS = {
-        "/js/paste/paste.js", "/js/paste/ui/utilities/animation-frame.js"};
-
-    private static void animationFramePageWrapperRegressions(Browser browser, String engine) {
-        Map<String, String> wrappers = new LinkedHashMap<>();
-        wrappers.put("no time", "window.afNative = window.requestAnimationFrame; (function () {" +
-            " var native = window.afNative; window.requestAnimationFrame = function (cb) {" +
-            " return native.call(window, function () { cb(); }); }; })();");
-        wrappers.put("synchronous", "window.afNative = window.requestAnimationFrame; (function () {" +
-            " var k = 0; window.requestAnimationFrame = function (cb) { cb(performance.now()); k += 1; return k; }; })();");
-        for (Map.Entry<String, String> wrapper : wrappers.entrySet()) {
-            String pagePath = "animation-frame-wrapper-" + (wrapper.getKey().equals("no time") ? "no-time" : "sync") + ".html";
-            scenario(browser, engine, "animation-frame keeps batches on the frame clock under a page's "
-                    + wrapper.getKey() + " requestAnimationFrame wrapper", null,
-                context -> routeCheckPage(context, pagePath, checkPage("",
-                    "<script>" + wrapper.getValue() + "</script>",
-                    ANIMATION_FRAME_WRAPPER_SCRIPTS,
-                    "paste.define('check.animation-frame-wrapper', ['paste.ui.utilities.animation-frame']," +
-                    " (m, frames) => { window.afWrapFrames = frames; return m; });"),
-                    null),
-                (page, evidence) -> {
-                    openCheckPage(page, pagePath);
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> run = (Map<String, Object>) page.evaluate("async () => {" +
-                        " const frames = window.afWrapFrames; const times = []; let inside = true; let early = false;" +
-                        " const t0 = performance.now();" +
-                        " await new Promise(resolve => {" +
-                        "  const step = t => { times.push(t); if (times.length < 12) frames.request(step); else resolve(); };" +
-                        "  frames.request(t => { if (inside) early = true; step(t); });" +
-                        "  inside = false; setTimeout(resolve, 3000); });" +
-                        " return {early, times, t0, now: performance.now(), loaded: !!frames," +
-                        "  wrapped: window.requestAnimationFrame !== window.afNative}; }");
-                    evidence.putAll(run);
-                    active(Boolean.TRUE.equals(run.get("loaded")), "the module defined under the wrapper");
-                    active(Boolean.TRUE.equals(run.get("wrapped")), "the page's wrapper replaced requestAnimationFrame");
-                    List<?> times = (List<?>) run.get("times");
-                    double t0 = ((Number) run.get("t0")).doubleValue();
-                    double now = ((Number) run.get("now")).doubleValue();
-                    require(!Boolean.TRUE.equals(run.get("early")), "a batch ran inside request()");
-                    require(times.size() == 12, "the chained batches stopped after " + times.size() + " of 12");
-                    double previous = Double.NEGATIVE_INFINITY;
-                    for (Object time : times) {
-                        double t = ((Number) time).doubleValue();
-                        require(t > previous, "batch times did not strictly increase: " + times);
-                        require(t >= t0 - 50 && t <= now + 1, "a batch time is off the performance.now() clock: " + times);
-                        previous = t;
-                    }
-                    double span = ((Number) times.get(times.size() - 1)).doubleValue()
-                        - ((Number) times.get(0)).doubleValue();
-                    require(span >= 80, "twelve batches spanned " + span + " ms of frame time: the clock froze");
-                });
-        }
-    }
-
-    // A page wrapper that refuses a frame request yet registers the real
-    // frame too — one that registers and then throws, and one that calls
-    // back at once and also registers — leaves two carriers for one
-    // batch. A per-batch loop runs for one second while the page counts
-    // real frames. The first carrier to arrive delivers and the other is
-    // stale, so batches keep pace with frames: a frame the host delivers
-    // later than the 20 ms fallback timer can share its interval with
-    // that timer's batch, so a real frame carries at most two batches,
-    // the run at most a quarter more batches than frames, and the second
-    // half is no busier than the first.
-    private static void animationFrameDoubleCarrierRegressions(Browser browser, String engine) {
-        String counter = "window.afNative = window.requestAnimationFrame; window.afRealFrames = 0;" +
-            " (function tick() { window.afRealFrames += 1; window.afNative.call(window, tick); })();";
-        Map<String, String> wrappers = new LinkedHashMap<>();
-        wrappers.put("registering-then-throwing", counter + " window.requestAnimationFrame = function (cb) {" +
-            " window.afNative.call(window, cb); throw new Error('wrapper failed after registering'); };");
-        wrappers.put("synchronous-and-registering", counter + " window.requestAnimationFrame = function (cb) {" +
-            " cb(performance.now()); return window.afNative.call(window, cb); };");
-        for (Map.Entry<String, String> wrapper : wrappers.entrySet()) {
-            String pagePath = "animation-frame-double-carrier-" + wrapper.getKey() + ".html";
-            scenario(browser, engine, "animation-frame keeps batches to the pace of real frames under a page's "
-                    + wrapper.getKey() + " requestAnimationFrame wrapper", null,
-                context -> routeCheckPage(context, pagePath, checkPage("",
-                    "<script>" + wrapper.getValue() + "</script>",
-                    ANIMATION_FRAME_WRAPPER_SCRIPTS,
-                    "paste.define('check.animation-frame-double-carrier', ['paste.ui.utilities.animation-frame']," +
-                    " (m, frames) => { window.afWrapFrames = frames; return m; });"),
-                    null),
-                (page, evidence) -> {
-                    openCheckPage(page, pagePath);
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> run = (Map<String, Object>) page.evaluate("async () => {" +
-                        " const frames = window.afWrapFrames; const per = {}; let batches = 0, maxPer = 0;" +
-                        " let stop = false, inside = false, early = false, threw = 0;" +
-                        " const sleep = ms => new Promise(r => setTimeout(r, ms));" +
-                        " const loop = () => { if (inside) early = true; batches += 1; const f = window.afRealFrames;" +
-                        "  per[f] = (per[f] || 0) + 1; if (per[f] > maxPer) maxPer = per[f];" +
-                        "  if (!stop && batches < 5000) { inside = true; try { frames.request(loop); } catch (e) { threw += 1; } inside = false; } };" +
-                        " const f0 = window.afRealFrames;" +
-                        " inside = true; try { frames.request(loop); } catch (e) { threw += 1; } inside = false;" +
-                        " await sleep(500); const firstHalf = batches; const fHalf = window.afRealFrames;" +
-                        " await sleep(500); stop = true;" +
-                        " return {batches, firstHalf, secondHalf: batches - firstHalf, realFrames: window.afRealFrames - f0," +
-                        "  firstHalfFrames: fHalf - f0, maxBatchesPerRealFrame: maxPer, early, threw, loaded: !!frames," +
-                        "  wrapped: window.requestAnimationFrame !== window.afNative}; }");
-                    evidence.putAll(run);
-                    active(Boolean.TRUE.equals(run.get("loaded")), "the module defined under the wrapper");
-                    active(Boolean.TRUE.equals(run.get("wrapped")), "the page's wrapper replaced requestAnimationFrame");
-                    int batches = ((Number) run.get("batches")).intValue();
-                    int realFrames = ((Number) run.get("realFrames")).intValue();
-                    int firstHalf = ((Number) run.get("firstHalf")).intValue();
-                    int secondHalf = ((Number) run.get("secondHalf")).intValue();
-                    int maxPer = ((Number) run.get("maxBatchesPerRealFrame")).intValue();
-                    active(realFrames >= 20, "the page counted real frames: " + realFrames);
-                    require(!Boolean.TRUE.equals(run.get("early")), "a batch ran inside request()");
-                    require(((Number) run.get("threw")).intValue() == 0, "request() threw under the wrapper");
-                    require(batches >= realFrames / 2, "the loop stalled: " + batches + " batches in " + realFrames + " frames");
-                    require(maxPer <= 2, "a real frame carried " + maxPer + " batches");
-                    require(batches <= realFrames * 5 / 4 + 2, batches + " batches in " + realFrames + " real frames");
-                    require(secondHalf <= firstHalf * 5 / 4 + 5, "batches grew: " + firstHalf + " then " + secondHalf);
-                });
-        }
+    private static void animationFrameNativeChecks(Browser browser, String engine) {
+        scenario(browser, engine, "animation-frame uses native asynchronous batches and cancellation", null,
+            context -> routeCheckPage(context, "animation-frame-native.html", checkPage("", "",
+                new String[]{"/js/paste/paste.js", "/js/paste/ui/utilities/animation-frame.js"},
+                "paste.define('check.frame', ['paste.ui.utilities.animation-frame'], function (m, af) {" +
+                " window.afResult=[]; var inside=true; var cancelled=af.request(function(){afResult.push('cancelled')});" +
+                " af.cancel(cancelled); af.requestPhased(function(t){afResult.push(['read',inside,t])}," +
+                " function(t){afResult.push(['write',inside,t])}); af.request(function(t){afResult.push(['plain',inside,t])}); inside=false; });"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "animation-frame-native.html"); frames(page);
+                active((Boolean) page.evaluate("() => afResult.length===3 && afResult.map(x=>x[0]).join(',')==='read,plain,write' && afResult.every(x=>x[1]===false && typeof x[2]==='number' && x[2]===afResult[0][2])"), "native batch/cancellation contract failed");
+                evidence.put("batch", page.evaluate("() => afResult"));
+            });
     }
 
     public static void main(String[] args) throws Exception {

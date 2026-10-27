@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Playwright 1.41 otherwise forces loopback through the configured dead proxy.
+export PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK=1
 
 # Supply an existing Playwright 1.41 Java runtime; this runner never downloads dependencies.
 # PLAYWRIGHT_JAVA_CLASSPATH must include playwright, driver, driver-bundle and gson jars.
@@ -27,6 +29,6 @@ cd -- "$root"
 export TMPDIR="$out/tmp"
 marquee_url="${MARQUEE_URL:-http://127.0.0.1:8077/}"
 node "$root/tests/build-marquee-example.cjs" --verify "$marquee_url" "$out/marquee-identity.json"
-javac -cp "$PLAYWRIGHT_JAVA_CLASSPATH" -d "$out" "$root/tests/MarqueeBrowserChecks.java"
+javac -encoding UTF-8 -cp "$PLAYWRIGHT_JAVA_CLASSPATH" -d "$out" "$root/tests/MarqueeBrowserChecks.java"
 java -Djava.io.tmpdir="$out/tmp" -cp "$out:$PLAYWRIGHT_JAVA_CLASSPATH" \
   MarqueeBrowserChecks "$marquee_url" "$out" 2>&1 | tee "$out/run.log"
