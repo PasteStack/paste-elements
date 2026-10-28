@@ -53,7 +53,7 @@ paste-elements/
 ├── tests/                      # Development only — not part of the package
 │   ├── *.test.cjs              # node:test contract suites
 │   ├── fakes.cjs               # Shared DOM/runtime fake for the suites
-│   ├── vendor/                 # JSLint, used by the lint gates (see NOTICE.md)
+│   ├── vendor/                 # JSLint, used by the lint gates (see NOTICE)
 │   ├── serve-examples.cjs      # Loopback fixture host for examples/
 │   └── run-*-browser-checks.sh # Playwright Java runners (no downloads)
 │
@@ -70,7 +70,7 @@ paste-elements/
 ```
 
 The published package is source only: `base/`, `modules/`, `structure/`,
-`README.md`, `LICENSE`, `NOTICE.md` and `VERSION`. Tests, the vendored test
+`README.md`, `LICENSE`, `NOTICE` and `VERSION`. Tests, the vendored test
 tooling and the examples stay in the repository; `.gitattributes` marks
 `tests/` and `examples/` `export-ignore`, so source archives built from a tag
 leave them out too.
@@ -1464,7 +1464,7 @@ should validate their authored CSS and native navigation there.
 
 ## License
 
-Apache License, Version 2.0. See `LICENSE` and `NOTICE.md`.
+Apache License, Version 2.0. See `LICENSE` and `NOTICE`.
 
 ## Ordered playback
 
