@@ -18,6 +18,7 @@ paste-elements/
 ├── modules/                    # UI modules (JS + SCSS together)
 │   ├── heroscroll/             # heroscroll.js, heroscroll.scss, _mixin.scss
 │   ├── smoothscroll/           # Optional controlled anchor movement/history
+│   ├── scrolltop/              # Declared links to the current page return to the top
 │   ├── stickynav/              # stickynav.js, stickynav.scss
 │   ├── scrollspy/              # scrollspy.js, scrollspy.scss
 │   ├── sectionnav/             # sectionnav.scss, _mixin.scss (no JS)
@@ -248,6 +249,7 @@ Processes all JS/SCSS, generates versioned output and manifest.
 |--------|:--:|:----:|-------------|
 | heroscroll | ✓ | ✓ | Parallax hero sections |
 | smoothscroll | ✓ | - | Optional motion and independently controlled history |
+| scrolltop | ✓ | - | A declared link to the current page returns to the top without a reload |
 | stickynav | ✓ | ✓ | Sticky navigation bar |
 | scrollspy | ✓ | ✓ | Marks a nav item active as its section scrolls into view |
 | sectionnav | - | ✓ | In-page section navigation styling |
@@ -1114,17 +1116,19 @@ requires `paste.util` and `paste.oop`.
 preference through `paste.ui.utilities.mediaquery`: a preference the platform cannot report (no
 `matchMedia`, a throwing one, or a query with no listener API) counts as
 reduced. Smoothscroll checks `matchMedia` at the start of each movement; a
-missing API or a reduced preference lands immediately. Native smooth scrolling
-follows the page's CSS motion policy.
+missing API or a reduced preference lands immediately. Native smooth scrolling,
+native mode included, follows the page's CSS motion policy.
 
 - **smoothscroll**
   - Optional same-document anchor motion: 500 ms cubic easing, with a history
     update independent of native fragment navigation and no synthetic hashchange.
     Plain anchor clicks push immediately; legacy marked containers and section
     navs delegate clicks, including newly inserted links, and push at completion.
-  - `init()` discovers links without duplicate bindings. `scrollTo(element,
-    duration)` moves only; `scrollTo(id, verticalOffset)` retains the older
-    offset/completion-history contract. Omitted duration is 500 ms; zero is instant.
+  - Links are discovered when the module is defined, or at `DOMContentLoaded`
+    while the document is loading; `init()` repeats discovery without
+    duplicate bindings. `scrollTo(element, duration)` moves only;
+    `scrollTo(id, verticalOffset)` retains the older offset/completion-history
+    contract. Omitted duration is 500 ms; zero is instant.
   - The Paste `smoothscroll` event accepts `newURL`, `verticalOffset`, and
     `updateHash`. The id has no leading `#`; omitted updateHash is true, false
     suppresses history. Legacy boolean strings are case-insensitive. An event
@@ -1135,6 +1139,36 @@ follows the page's CSS motion policy.
     browsing contexts and missing targets retain native navigation.
   - Native anchors and CSS remain sufficient when these extra contracts are
     not needed. CSS smooth motion alone does not establish history equivalence.
+  - Native motion: `:root { --paste-smoothscroll-motion: native; }`, read once
+    when the module is defined, leaves link clicks to the browser — no link
+    is discovered or bound. `scroll-behavior`, `scroll-margin-top` and
+    `scroll-padding-top` own motion, reduced motion and clearance; the page
+    enables smooth `scroll-behavior` only under
+    `prefers-reduced-motion: no-preference`.
+    `scrollTo(id)` and the event navigate to the fragment natively; a target
+    the address already names, `scrollTo(element)` and `updateHash: false`
+    use `scrollIntoView()`. Duration and `verticalOffset` do not apply;
+    missing targets, including ones not yet parsed, are ignored. Link the
+    stylesheet that sets the property ahead of the script: only a stylesheet
+    linked in the markup, with no onload swap, reliably holds back the inline
+    and parser-blocking scripts after it while it loads, not `async`, `defer`
+    or module ones.
+- **scrolltop**
+  - `<a href="/" data-paste-scrolltop>`: a declared link to the current page
+    returns to the top without a reload and without leaving a `#` in the
+    address. The browser performs its own navigation to the empty fragment —
+    the scroll, the history entry, and any `scroll-behavior` — and the
+    module then rewrites that entry's address without the `#`. Back restores
+    the position the click left. The rewritten entry's `history.state` is
+    `"paste.ui.scrolltop"`; a repeat click replaces that entry, as a native
+    `#` link does. The module scrolls nothing itself.
+  - The href must name the current address's path and query, with no fragment
+    or an empty one. Modified and non-primary clicks, other browsing
+    contexts, `download` and `ping` links and any non-empty fragment stay
+    native. From an address already ending in `#`, the click replaces that
+    entry, as a native `#` link does. Nothing binds without a declaration
+    when the module is defined, or without `history.replaceState`.
+  - Without JavaScript the link is an ordinary link to the page.
 - **stickynav**
   - Each `[data-paste-sticky-nav]` marks a nav. A nonempty attribute value
     names its target by CSS selector; an empty value uses the first

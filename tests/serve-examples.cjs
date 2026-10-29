@@ -218,7 +218,7 @@ const uiElements = [
     'select', 'allowed_chars', 'imageupload', 'js_tooltip', 'navigate_on_change', 'prevent_double_submit', 'sortable', 'update_text_on_input_change',
     'fragment_navigation', 'autogrow', 'lazy_loader', 'carousel', 'heroscroll', 'imagesequence',
     'marquee', 'multistate', 'progressiveresolution', 'scrollscrub', 'scrollspy',
-    'stickynav', 'smoothscroll'
+    'stickynav', 'smoothscroll', 'scrolltop'
 ];
 const uiUtilities = ['io-html-fragment', 'form-dom', 'animation-frame', 'imageresolution', 'mediaquery', 'scrollrange', 'throttle'];
 const uiModuleUrls = routeTable({});
@@ -292,7 +292,7 @@ const identityPaths = [
     '/js/paste/ui/progressiveresolution.js',
     '/js/paste/ui/imagesequence.js',
     '/js/paste/ui/multistate.js',
-    '/js/paste/ui/autogrow.js', '/js/paste/ui/smoothscroll.js',
+    '/js/paste/ui/autogrow.js', '/js/paste/ui/smoothscroll.js', '/js/paste/ui/scrolltop.js',
     '/js/paste/io.js', '/js/paste/ui/utilities/form-dom.js', '/js/paste/ui/utilities/io-html-fragment.js', '/js/paste/ui/form/form_validity.js', '/js/paste/ui/form/form_apply.js', '/js/paste/ui/form/form_html.js', '/js/paste/ui/lazy_loader.js', '/js/paste/ui/carousel.js', '/js/paste/ui/scrollspy.js'
 ];
 

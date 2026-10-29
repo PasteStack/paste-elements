@@ -20,11 +20,32 @@
  * Smooth same-document anchors. Plain links push immediately; legacy marked
  * containers delegate clicks and push at completion. Both use 500ms cubic
  * movement without native fragment navigation or synthetic hashchange.
- * init() discovers links. scrollTo(element, duration) moves only;
+ * Discovery runs at define, or at DOMContentLoaded while the document is
+ * loading; init() repeats it. scrollTo(element, duration) moves only;
  * scrollTo(id, offset) retains the legacy completion-history contract.
  * The smoothscroll event accepts {newURL, verticalOffset, updateHash}.
  * Wheel input cancels pending motion/history. Reduced motion lands immediately.
  * No focus reassignment. Modified clicks and foreign destinations stay native.
+ *
+ * Native motion: when the root's computed --paste-smoothscroll-motion is
+ * "native" at define, no link is discovered or bound and clicks stay
+ * native — CSS owns motion, clearance and reduced motion through
+ * scroll-behavior, scroll-margin-top and scroll-padding-top; the page
+ * enables smooth scroll-behavior only under prefers-reduced-motion:
+ * no-preference. scrollTo(id) and the event navigate to the fragment
+ * natively; a target the address already names, scrollTo(element) and
+ * updateHash false use scrollIntoView. Duration and offsets do not apply;
+ * missing targets, including ones not yet parsed, are ignored. Nothing
+ * waits for the document: the root's style is read at define, so link the
+ * stylesheet that sets the property ahead of the script. Only a stylesheet
+ * linked in the markup, with no onload swap, reliably holds back the inline
+ * and parser-blocking scripts after it while it loads, not async, defer or
+ * module ones.
+ *
+ * @example
+ *     :root { --paste-smoothscroll-motion: native; }
+ *     section[id] { scroll-margin-top: 4rem; }
+ *
  * @requires paste/dom
  * @requires paste/event
  * @requires paste/ui/utilities/animation-frame
@@ -50,6 +71,10 @@ paste['define'](
             generation = 0,
             wheel = null,
             oldWheel = null,
+            // The root's computed style read once at define; a host
+            // without it keeps the default motion.
+            nativeMotion = typeof $w.getComputedStyle === 'function' &&
+                $w.getComputedStyle($d.documentElement).getPropertyValue('--paste-smoothscroll-motion').trim() === 'native',
             command,
             stop = function () {
                 generation += 1;
@@ -83,6 +108,21 @@ paste['define'](
                     }
                 }
                 return target;
+            },
+            // Native motion: the platform's fragment navigation owns motion,
+            // the focus starting point and the history entry. Setting the
+            // fragment the address already carries does not scroll in every
+            // engine, so a target that is already current is only scrolled
+            // into view.
+            land = function (target, id) {
+                if (!target) {
+                    return;
+                }
+                if (id !== null && resolve($w.location.hash.slice(1)) !== target) {
+                    $w.location.hash = id;
+                } else if (target.scrollIntoView) {
+                    target.scrollIntoView();
+                }
             },
             navOffset = function () {
                 var nav = dom['querySelector']('.paste-ui-section-nav');
@@ -149,6 +189,10 @@ paste['define'](
                 target = resolve(id);
                 update = !$hasOwn['call'](data, 'updateHash') || data['updateHash'] === true ||
                         (typeof data['updateHash'] === 'string' && data['updateHash'].toLowerCase() === 'true');
+                if (nativeMotion) {
+                    land(target, update ? id : null);
+                    return;
+                }
                 offset = Number(data['verticalOffset']) || 0;
                 move(target, 500, offset, update ? '#' + id : null);
             },
@@ -191,10 +235,17 @@ paste['define'](
                 }
             },
             init = function () {
-                var declared = dom['get']('a[href*="#"], [data-paste-smoothscroll], .paste-ui-section-nav', true) || [],
-                    index = declared.length,
+                var declared,
+                    index,
                     element,
                     found;
+                // CSS owns motion and clearance: native clicks scroll and push
+                // history as authored, so no link needs discovery or a listener.
+                if (nativeMotion) {
+                    return;
+                }
+                declared = dom['get']('a[href*="#"], [data-paste-smoothscroll], .paste-ui-section-nav', true) || [];
+                index = declared.length;
                 while (index--) {
                     element = declared[index];
                     found = links ? links.has(element) : legacyLinks.indexOf(element) >= 0;
@@ -212,14 +263,22 @@ paste['define'](
         smoothscroll['init'] = init;
         smoothscroll['scrollTo'] = function (target, value) {
             if (typeof target === 'string') {
+                if (nativeMotion) {
+                    land(resolve(target), target);
+                    return;
+                }
                 move(resolve(target), 500, value === undefined ? navOffset() : Number(value) || 0, '#' + target);
             } else {
+                if (nativeMotion) {
+                    land(target, null);
+                    return;
+                }
                 move(target, value === undefined ? 500 : value, 0, null);
             }
         };
         command = new event['Event']($w, 'smoothscroll');
         command['subscribe'](legacy);
-        if ($d.readyState === 'loading') {
+        if (!nativeMotion && $d.readyState === 'loading') {
             bind('DOMContentLoaded', $d, init, null, 1);
         } else {
             init();
