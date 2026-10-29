@@ -186,7 +186,7 @@ const LATER_DIRECTIVE = /\/\*\s*(?:jslint|jshint|globals?|properties|members)\b/
 // header comments; every gate sees the source as it is from that point.
 function stripLicenseBlock(source) {
     const match = source.match(/^\/\*![\s\S]*?\*\/\r?\n?/);
-    return match ? source.slice(match[0].length) : source;
+    return match ? source.slice(match[0].length).replace(/^\s+/, '') : source;
 }
 
 function headerOffenses(source) {
