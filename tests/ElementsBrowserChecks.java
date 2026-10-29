@@ -17,6 +17,7 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.microsoft.playwright.*;
+import com.microsoft.playwright.options.KeyboardModifier;
 import com.microsoft.playwright.options.ReducedMotion;
 import com.microsoft.playwright.options.WaitUntilState;
 import java.awt.image.BufferedImage;
@@ -194,7 +195,7 @@ public final class ElementsBrowserChecks {
         "/js/paste/ui/progressiveresolution.js",
         "/js/paste/ui/imagesequence.js",
         "/js/paste/ui/multistate.js",
-        "/js/paste/ui/autogrow.js", "/js/paste/ui/smoothscroll.js",
+        "/js/paste/ui/autogrow.js", "/js/paste/ui/smoothscroll.js", "/js/paste/ui/scrolltop.js",
         "/js/paste/io.js", "/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/form/form_validity.js", "/js/paste/ui/form/form_html.js", "/js/paste/ui/form/form_apply.js", "/js/paste/ui/lazy_loader.js", "/js/paste/ui/carousel.js", "/js/paste/ui/scrollspy.js");
 
     // Where the runner's own checkout says a served URL lives — the same
@@ -730,6 +731,9 @@ public final class ElementsBrowserChecks {
         "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
         "/js/paste/dom.js", "/js/paste/event.js",
         "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/smoothscroll.js"};
+    private static final String[] SCROLLTOP_SCRIPTS = {
+        "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/event.js",
+        "/js/paste/ui/scrolltop.js"};
     private static final String[] HEROSCROLL_SCRIPTS = {
         "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
         "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
@@ -1390,6 +1394,169 @@ public final class ElementsBrowserChecks {
                 page.evaluate("() => history.back()"); page.waitForFunction("() => location.hash === ''");
                 page.evaluate("() => history.forward()"); page.waitForFunction("() => location.hash === '#destination'");
                 evidence.put("historyLength", page.evaluate("() => history.length"));
+            });
+        // Native motion: the page's CSS owns movement and clearance, so a click
+        // is the browser's own fragment navigation (with its hashchange) and
+        // lands at the target's scroll-margin. The fixed link is clicked
+        // without first being scrolled into view.
+        scenario(browser, engine, "smoothscroll native motion leaves clicks native and routes the API through fragment navigation", null,
+            context -> routeCheckPage(context, "smoothscroll-native.html", checkPage(
+                ":root{--paste-smoothscroll-motion:native }main{height:4000px}" +
+                "#destination{position:absolute;top:1200px;scroll-margin-top:100px}#jump{position:fixed;top:0}",
+                "<a id='jump' href='#destination'>Jump</a><main><section id='destination'>Target</section></main>",
+                SMOOTHSCROLL_SCRIPTS, "window.hashEvents=0;addEventListener('hashchange',()=>window.hashEvents++);"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-native.html");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#jump");
+                awaitActive(page, "() => Math.abs(scrollY-1100)<2 && window.hashEvents === 1");
+                require(page.evaluate("() => location.hash").equals("#destination"), "fragment not navigated");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "missing history entry");
+                page.evaluate("() => scrollTo({top:0,behavior:'instant'})");
+                page.evaluate("() => paste.ui.smoothscroll.scrollTo('destination')");
+                page.waitForFunction("() => Math.abs(scrollY-1100)<2");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1,
+                    "a target the address already names added history");
+                page.evaluate("() => paste.ui.smoothscroll.scrollTo('missing')");
+                require(page.evaluate("() => location.hash").equals("#destination"), "a missing target changed the address");
+                page.evaluate("() => history.back()"); page.waitForFunction("() => location.hash === ''");
+                page.evaluate("() => { scrollTo({top:0,behavior:'instant'}); paste.ui.smoothscroll.scrollTo('destination'); }");
+                page.waitForFunction("() => location.hash === '#destination' && window.hashEvents === 3 && Math.abs(scrollY-1100)<2");
+                evidence.put("historyLength", page.evaluate("() => history.length"));
+            });
+        // The declared link names its own page and is fixed, as a header
+        // logo is, so clicking it does not first scroll it into view.
+        scenario(browser, engine, "scrolltop navigates to the empty fragment and strips the hash", null,
+            context -> routeCheckPage(context, "scrolltop-history.html", checkPage(
+                "main{height:4000px}#toplink{position:fixed;top:0}",
+                "<a id='toplink' href='scrolltop-history.html' data-paste-scrolltop>Home</a><main></main>",
+                SCROLLTOP_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrolltop-history.html");
+                page.evaluate("() => { window.sameDocument = true; scrollTo({top:1400,behavior:'instant'}); }");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#toplink");
+                awaitActive(page, "() => scrollY === 0");
+                require(page.evaluate("() => location.href").equals(url + "checks/scrolltop-history.html"),
+                    "fragment leaked into the address");
+                require(Boolean.TRUE.equals(page.evaluate("() => window.sameDocument === true")), "the page reloaded");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "missing history entry");
+                page.evaluate("() => history.back()");
+                page.waitForFunction("() => Math.round(scrollY) === 1400");
+                require(Boolean.TRUE.equals(page.evaluate("() => window.sameDocument === true")), "Back left the document");
+                evidence.put("restoredScrollY", page.evaluate("() => scrollY"));
+            });
+        // A top-level window is its own top and its own parent, so those
+        // targets name the current context and reload natively otherwise.
+        scenario(browser, engine, "scrolltop treats _top and _parent in a top-level window as the current context", null,
+            context -> routeCheckPage(context, "scrolltop-top.html", checkPage(
+                "main{height:4000px}#toplink,#parentlink{position:fixed;top:0}#parentlink{left:120px}",
+                "<a id='toplink' href='scrolltop-top.html' target='_top' data-paste-scrolltop>Home</a>" +
+                "<a id='parentlink' href='scrolltop-top.html' target='_parent' data-paste-scrolltop>Up</a><main></main>",
+                SCROLLTOP_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrolltop-top.html");
+                page.evaluate("() => { window.sameDocument = true; }");
+                for (String link : List.of("#toplink", "#parentlink")) {
+                    page.evaluate("() => scrollTo({top:1400,behavior:'instant'})");
+                    page.click(link);
+                    awaitActive(page, "() => scrollY === 0");
+                    require(Boolean.TRUE.equals(page.evaluate("() => window.sameDocument === true")),
+                        link + " reloaded the page");
+                    require(page.evaluate("() => location.href").equals(url + "checks/scrolltop-top.html"),
+                        link + " left the fragment in the address");
+                }
+                evidence.put("historyLength", page.evaluate("() => history.length"));
+            });
+        scenario(browser, engine, "scrolltop lands at once under reduced motion, replaces its own entry on repeat, and Back restores the position",
+            Map.of("reducedMotion", ReducedMotion.REDUCE),
+            context -> routeCheckPage(context, "scrolltop-reduced.html", checkPage(
+                "html{scroll-behavior:smooth}@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}" +
+                "main{height:4000px}#toplink{position:fixed;top:0}",
+                "<a id='toplink' href='scrolltop-reduced.html' data-paste-scrolltop>Home</a><main></main>",
+                SCROLLTOP_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrolltop-reduced.html");
+                page.evaluate("() => { window.sameDocument = true; scrollTo({top:1400,behavior:'instant'}); }");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#toplink");
+                // The page's reduced-motion rule makes the browser's own scroll instant.
+                active(((Number) page.evaluate("() => scrollY")).intValue() == 0, "reduced motion did not land at once");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1,
+                    "the empty-fragment navigation added no history entry");
+                // A repeat activation replaces the module's own entry, as a native
+                // "#" link does, so Back still returns to the reading position.
+                page.dblclick("#toplink");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1,
+                    "a repeat activation added another history entry");
+                page.evaluate("() => history.back()");
+                page.waitForFunction("() => Math.round(scrollY) === 1400");
+                require(Boolean.TRUE.equals(page.evaluate("() => window.sameDocument === true")), "Back left the document");
+                evidence.put("restoredScrollY", page.evaluate("() => scrollY"));
+            });
+        // A page's own back-to-top link leaves the address ending in "#"; the
+        // declared link then navigates to that same address, which replaces
+        // the entry instead of reloading the document.
+        scenario(browser, engine, "scrolltop returns to the top from an address ending in \"#\" without reloading", null,
+            context -> routeCheckPage(context, "scrolltop-hash.html", checkPage(
+                "main{height:4000px}#toplink,#hashlink{position:fixed;top:0}#hashlink{left:120px}",
+                "<a id='toplink' href='scrolltop-hash.html' data-paste-scrolltop>Home</a>" +
+                "<a id='hashlink' href='#'>Top</a><main></main>",
+                SCROLLTOP_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrolltop-hash.html");
+                page.evaluate("() => { window.sameDocument = true; scrollTo({top:1400,behavior:'instant'}); }");
+                page.click("#hashlink");
+                page.waitForFunction("() => scrollY === 0 && location.href.endsWith('#')");
+                page.evaluate("() => scrollTo({top:900,behavior:'instant'})");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#toplink");
+                awaitActive(page, "() => scrollY === 0");
+                require(page.evaluate("() => location.href").equals(url + "checks/scrolltop-hash.html"),
+                    "the \"#\" survived the return to the top");
+                require(Boolean.TRUE.equals(page.evaluate("() => window.sameDocument === true")), "the page reloaded");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before,
+                    "navigating to the same address added a history entry");
+                page.evaluate("() => history.back()");
+                page.waitForFunction("() => Math.round(scrollY) === 1400");
+                require(Boolean.TRUE.equals(page.evaluate("() => window.sameDocument === true")), "Back left the document");
+                evidence.put("restoredScrollY", page.evaluate("() => scrollY"));
+            });
+        scenario(browser, engine, "scrolltop leaves fragment and modified clicks native", null,
+            context -> routeCheckPage(context, "scrolltop-native.html", checkPage(
+                "main{height:4000px}#destination{position:absolute;top:1200px}#toplink,#frag{position:fixed;top:0;z-index:1}#frag{left:120px}",
+                "<a id='toplink' href='scrolltop-native.html' data-paste-scrolltop>Home</a>" +
+                "<a id='frag' href='scrolltop-native.html#destination' data-paste-scrolltop>Fragment</a>" +
+                "<main><section id='destination'>Target</section></main>",
+                SCROLLTOP_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrolltop-native.html");
+                page.evaluate("() => scrollTo({top:600,behavior:'instant'})");
+                page.click("#frag");
+                active(((Number) page.evaluate("() => scrollY")).intValue() > 0,
+                    "module hijacked a fragment link");
+                require(page.evaluate("() => location.hash").equals("#destination"), "native fragment nav did not run");
+                // From the real fragment, the declared link still returns to the
+                // top and the address drops the fragment with the "#".
+                page.evaluate("() => { window.sameDocument = true; }");
+                int fromFragment = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#toplink");
+                awaitActive(page, "() => scrollY === 0");
+                require(page.evaluate("() => location.href").equals(url + "checks/scrolltop-native.html"),
+                    "the fragment survived the return to the top");
+                require(((Number) page.evaluate("() => history.length")).intValue() == fromFragment + 1, "missing history entry");
+                require(Boolean.TRUE.equals(page.evaluate("() => window.sameDocument === true")), "the page reloaded");
+                page.evaluate("() => history.back()");
+                page.waitForFunction("() => location.hash === '#destination' && Math.abs(scrollY-1200)<2");
+                // Shift fires click in every engine; the window listener runs after
+                // the module's document listener and keeps the native new window shut.
+                page.evaluate("() => { scrollTo({top:1400,behavior:'instant'}); addEventListener('click', e => " +
+                    "{ window.modifiedCancelled = e.defaultPrevented; e.preventDefault(); }); }");
+                page.click("#toplink", new Page.ClickOptions().setModifiers(List.of(KeyboardModifier.SHIFT)));
+                require(Boolean.FALSE.equals(page.evaluate("() => window.modifiedCancelled")), "module handled a modified click");
+                require(((Number) page.evaluate("() => scrollY")).intValue() == 1400,
+                    "modified click scrolled");
+                evidence.put("hash", page.evaluate("() => location.hash"));
             });
         scenario(browser, engine, "smoothscroll legacy containers delegate new links and retain completion history", null,
             context -> routeCheckPage(context, "smoothscroll-legacy.html", checkPage(
