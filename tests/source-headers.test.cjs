@@ -182,7 +182,15 @@ const EVAL_PATTERN = /\beval\s*\(|\[\s*(['"])eval\1\s*\]/g;
 // the file, where no reader of the header would see it.
 const LATER_DIRECTIVE = /\/\*\s*(?:jslint|jshint|globals?|properties|members)\b/g;
 
+// An optional /*! ... */ license block may sit before the required
+// header comments; every gate sees the source as it is from that point.
+function stripLicenseBlock(source) {
+    const match = source.match(/^\/\*![\s\S]*?\*\/\r?\n?/);
+    return match ? source.slice(match[0].length) : source;
+}
+
 function headerOffenses(source) {
+    source = stripLicenseBlock(source);
     const lines = source.split(/\r?\n/);
     const offenses = [];
     if (!(/^\/\*jslint\b/).test(lines[0] || '')) {
@@ -235,6 +243,7 @@ function iterationUses(source) {
 }
 
 function directiveOffenses(source) {
+    source = stripLicenseBlock(source);
     const offenses = [];
     const header = source.split(/\r?\n/)[0] || '';
     // The vars tolerance would silence the one-var-statement rule the
@@ -269,6 +278,7 @@ function consoleLines(source) {
 }
 
 function evalOffenses(source) {
+    source = stripLicenseBlock(source);
     const offenses = [];
     const header = source.split(/\r?\n/)[0] || '';
     if (header.indexOf('browser:true') === -1) {
