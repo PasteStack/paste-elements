@@ -1,3 +1,28 @@
+# paste-elements v0.8.0
+
+**Date:** 2026-10-29
+
+## Added
+
+- `paste.ui.scrolltop`: a declared anchor to the page the visitor is
+  already on (`<a href="/" data-paste-scrolltop>`) returns to the top
+  without a reload and without leaving a `#` in the address. The browser
+  performs the empty-fragment navigation — the scroll, the history entry
+  and any `scroll-behavior` — and the module rewrites the entry's
+  address with `history.replaceState`; traversal restores the position
+  the click left behind. Modified and non-primary clicks, other browsing
+  contexts, `download`/`ping` links and non-empty fragments stay native,
+  and without JavaScript the link is an ordinary link to the page.
+- Smoothscroll native motion: `:root { --paste-smoothscroll-motion: native; }`,
+  read once when the module is defined, makes the module step aside — no
+  link is discovered or bound, so `scroll-behavior`, `scroll-margin-top`,
+  `scroll-padding-top` and `prefers-reduced-motion` rules own motion and
+  clearance exactly as authored. `scrollTo(id)` and the `smoothscroll`
+  event route through the platform's own fragment navigation;
+  `scrollTo(element)` and `updateHash: false` use `scrollIntoView()`.
+
+---
+
 # paste-elements v0.7.1
 
 **Date:** 2026-10-28
