@@ -1376,24 +1376,236 @@ public final class ElementsBrowserChecks {
                 require(!(Boolean) page.evaluate("() => document.documentElement.classList.contains('paste-fixed-subnav')"), "root class was written");
                 evidence.put("states", page.evaluate(states));
             });
-        scenario(browser, engine, "smoothscroll pushes history without hashchange and preserves movement-only API", null,
+        // A declared container's link pushes at completion without hashchange;
+        // an undeclared link stays the platform's own fragment navigation.
+        scenario(browser, engine, "smoothscroll pushes history without hashchange and leaves undeclared links native", null,
             context -> routeCheckPage(context, "smoothscroll-history.html", checkPage(
-                "main{height:4000px}#destination{position:absolute;top:1200px}",
-                "<a id='jump' href='#destination'>Jump</a><main><section id='destination'>Target</section></main>",
+                "main{height:4000px}main section{position:absolute}#destination{top:1200px}#other{top:2400px}#jump{position:fixed;top:0}#undeclared{position:fixed;top:0;left:120px}",
+                "<span data-paste-smoothscroll><a id='jump' href='#destination'>Jump</a></span><a id='undeclared' href='#other'>Other</a>" +
+                "<main><section id='destination'>Target</section><section id='other'>Other</section></main>",
                 SMOOTHSCROLL_SCRIPTS, "window.hashEvents=0;addEventListener('hashchange',()=>window.hashEvents++);"), null),
             (page, evidence) -> {
                 openCheckPage(page, "smoothscroll-history.html");
-                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.evaluate("() => scrollTo({top:300,behavior:'instant'})");
                 page.click("#jump");
-                awaitActive(page, "() => Math.abs(scrollY-1200)<2");
+                awaitActive(page, "() => Math.abs(scrollY-1200)<2 && location.hash === '#destination'");
                 require(page.evaluate("() => location.hash").equals("#destination"), "fragment not pushed");
-                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "missing history entry");
                 require(((Number) page.evaluate("() => window.hashEvents")).intValue() == 0, "synthetic hashchange");
                 page.evaluate("() => paste.ui.smoothscroll.scrollTo(document.body,0)");
                 require(page.evaluate("() => location.hash").equals("#destination"), "movement changed history");
-                page.evaluate("() => history.back()"); page.waitForFunction("() => location.hash === ''");
+                // The completion push leaves the entry at the position the click left,
+                // so Back returns there, as it does after a native fragment navigation.
+                page.evaluate("() => history.back()"); page.waitForFunction("() => location.hash === '' && Math.abs(scrollY-300)<2");
                 page.evaluate("() => history.forward()"); page.waitForFunction("() => location.hash === '#destination'");
+                page.evaluate("() => { scrollTo({top:0,behavior:'instant'}); window.hashEvents = 0; }");
+                page.click("#undeclared");
+                page.waitForFunction("() => location.hash === '#other' && window.hashEvents === 1 && Math.abs(scrollY-2400)<2");
                 evidence.put("historyLength", page.evaluate("() => history.length"));
+            });
+        // A declared link that replaces a motion whose history is still
+        // pending pushes from where the first motion started, so Back returns
+        // to where the visitor began, not to a point partway through.
+        scenario(browser, engine, "smoothscroll pushes a replaced motion's history from where the first started", null,
+            context -> routeCheckPage(context, "smoothscroll-replaced.html", checkPage(
+                "main{height:5000px}main section{position:absolute}#b{top:3000px}#c{top:4000px}" +
+                "#to-b,#to-c{position:fixed;top:0}#to-c{left:120px}",
+                "<span data-paste-smoothscroll><a id='to-b' href='#b'>B</a><a id='to-c' href='#c'>C</a></span>" +
+                "<main><section id='b'>B</section><section id='c'>C</section></main>",
+                SMOOTHSCROLL_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-replaced.html");
+                page.evaluate("() => scrollTo({top:300,behavior:'instant'})");
+                page.click("#to-b");
+                page.waitForTimeout(120);
+                page.click("#to-c");
+                awaitActive(page, "() => location.hash === '#c' && Math.abs(scrollY-4000)<2");
+                // A link to the fragment the address already names adds no
+                // entry: the settle replaces it, as native does.
+                int entries = ((Number) page.evaluate("() => history.length")).intValue();
+                page.evaluate("() => scrollTo({top:1000,behavior:'instant'})");
+                page.click("#to-c");
+                awaitActive(page, "() => Math.abs(scrollY-4000)<2");
+                page.waitForTimeout(300);
+                require(((Number) page.evaluate("() => history.length")).intValue() == entries,
+                    "a link to the current fragment added a history entry");
+                page.evaluate("() => history.back()");
+                page.waitForFunction("() => location.hash === '' && Math.abs(scrollY-300)<2");
+                evidence.put("backY", page.evaluate("() => scrollY"));
+            });
+        // The module's own motion keeps the clearance native fragment
+        // navigation keeps: the target's scroll-margin-top plus the root's
+        // scroll-padding-top, read per movement. The fixed link is clicked
+        // without first being scrolled into view.
+        scenario(browser, engine, "smoothscroll motion keeps the page's CSS clearance and explicit offsets still win", null,
+            context -> routeCheckPage(context, "smoothscroll-clearance.html", checkPage(
+                "html{scroll-padding-top:30px}main{height:4000px}#destination{position:absolute;top:1200px;scroll-margin-top:70px}" +
+                "@media (max-width:600px){#destination{scroll-margin-top:20px}}#jump{position:fixed;top:0}",
+                "<span data-paste-smoothscroll><a id='jump' href='#destination'>Jump</a></span><main><section id='destination'>Target</section></main>",
+                SMOOTHSCROLL_SCRIPTS, "window.hashEvents=0;addEventListener('hashchange',()=>window.hashEvents++);"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-clearance.html");
+                page.click("#jump");
+                awaitActive(page, "() => Math.abs(scrollY-1100)<2 && location.hash === '#destination'");
+                require(page.evaluate("() => location.hash").equals("#destination"), "fragment not pushed");
+                require(((Number) page.evaluate("() => window.hashEvents")).intValue() == 0, "synthetic hashchange");
+                page.evaluate("() => { scrollTo({top:0,behavior:'instant'}); paste.ui.smoothscroll.scrollTo(document.getElementById('destination'), 0); }");
+                require(Math.abs(((Number) page.evaluate("() => scrollY")).doubleValue() - 1100) < 2, "element API ignored the clearance");
+                page.evaluate("() => { scrollTo({top:0,behavior:'instant'}); new paste.event.Event(window,'smoothscroll').fire({newURL:'destination',verticalOffset:80,updateHash:false}); }");
+                page.waitForFunction("() => Math.abs(scrollY-1120)<2");
+                page.setViewportSize(500, 700);
+                page.evaluate("() => { scrollTo({top:0,behavior:'instant'}); paste.ui.smoothscroll.scrollTo('destination'); }");
+                page.waitForFunction("() => Math.abs(scrollY-1150)<2");
+                evidence.put("narrowLanding", page.evaluate("() => scrollY"));
+            });
+        // The module writes the fragment through history, so it settles it with
+        // a same-address replace: the platform's own fragment steps move the
+        // sequential focus starting point and :target, and the landing holds,
+        // even an explicit offset under smooth scroll-behavior. Text fields are
+        // the controls plain Tab reaches in every engine's default settings;
+        // the target leads with text because native Firefox skips a control
+        // that is the target's first child.
+        scenario(browser, engine, "smoothscroll settles the fragment: Tab continues inside the target and :target follows", null,
+            context -> routeCheckPage(context, "smoothscroll-settle.html", checkPage(
+                "html{scroll-behavior:smooth}main{height:4000px}#destination{position:absolute;top:1200px;scroll-margin-top:60px}" +
+                "#jump,#between{position:fixed;top:0}#between{left:160px}",
+                "<span data-paste-smoothscroll><a id='jump' href='#destination'>Jump</a></span><input id='between' aria-label='Between'>" +
+                "<main><section id='destination'><p>Target</p><input id='inside' aria-label='Inside'></section></main>",
+                SMOOTHSCROLL_SCRIPTS, "window.hashEvents=0;addEventListener('hashchange',()=>window.hashEvents++);"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-settle.html");
+                int before = ((Number) page.evaluate("() => history.length")).intValue();
+                page.focus("#jump");
+                page.keyboard().press("Enter");
+                awaitActive(page, "() => Math.abs(scrollY-1140)<2 && document.getElementById('destination').matches(':target')");
+                page.waitForTimeout(300);
+                require(Math.abs(((Number) page.evaluate("() => scrollY")).doubleValue() - 1140) < 2, "the landing moved after the settle");
+                require(((Number) page.evaluate("() => history.length")).intValue() == before + 1, "the settle added a history entry");
+                require(((Number) page.evaluate("() => window.hashEvents")).intValue() == 0, "synthetic hashchange");
+                page.keyboard().press("Tab");
+                require("inside".equals(page.evaluate("() => document.activeElement.id")), "Tab did not continue inside the target");
+                page.evaluate("() => { document.activeElement.blur(); scrollTo({top:0,behavior:'instant'}); new paste.event.Event(window,'smoothscroll').fire({newURL:'destination',verticalOffset:80}); }");
+                page.waitForFunction("() => Math.abs(scrollY-1120)<2");
+                page.waitForTimeout(800);
+                require(Math.abs(((Number) page.evaluate("() => scrollY")).doubleValue() - 1120) < 2, "the settle overrode an explicit offset");
+                evidence.put("offsetLanding", page.evaluate("() => scrollY"));
+                // Native runs its fragment steps at activation, so a field the
+                // visitor focuses during a motion that settles at completion
+                // keeps focus and every key.
+                page.evaluate("() => { document.activeElement.blur(); scrollTo({top:0,behavior:'instant'}); paste.ui.smoothscroll.scrollTo('destination'); }");
+                page.waitForTimeout(150);
+                page.focus("#between");
+                page.keyboard().type("Ann");
+                page.waitForTimeout(900);
+                require(Boolean.TRUE.equals(page.evaluate("() => document.activeElement.id === 'between' && document.getElementById('between').value === 'Ann'")),
+                    "the settle took focus the visitor moved during the motion");
+            });
+        // The motion yields: a native navigation (an undeclared link stays
+        // native) supersedes it, and wheel input stops it where it is and
+        // cancels its pending history.
+        // A percentage scroll-padding-top is of the viewport, an id the address
+        // percent-encodes still settles, and a cross-origin <base> does not
+        // carry the settle away from the page.
+        scenario(browser, engine, "smoothscroll yields to native navigation and wheel input and settles encoded ids", null,
+            context -> routeCheckPage(context, "smoothscroll-yield.html", checkPage(
+                "html{scroll-padding-top:10%}main{height:6000px}main section{position:absolute}#a{top:1200px}#b{top:3000px}#c\\00e9{top:4500px}" +
+                "#jump,nav{position:fixed;top:0}nav{left:160px}",
+                "<span data-paste-smoothscroll><a id='jump' href='#a'>A</a></span><nav><a id='native' href='#b'>B</a></nav>" +
+                "<main><section id='a'>A</section><section id='b'>B</section><section id='c\u00e9'>C</section></main>",
+                SMOOTHSCROLL_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-yield.html");
+                page.click("#jump");
+                awaitActive(page, "() => Math.abs(scrollY - (1200 - document.documentElement.clientHeight / 10)) < 2");
+                page.evaluate("() => scrollTo({top:0,behavior:'instant'})");
+                page.click("#jump");
+                page.waitForTimeout(100);
+                page.click("#native");
+                page.waitForTimeout(900);
+                require(page.evaluate("() => location.hash").equals("#b"), "native navigation did not run");
+                require(Math.abs(((Number) page.evaluate("() => scrollY - (3000 - document.documentElement.clientHeight / 10)")).doubleValue()) < 2,
+                    "the motion overrode a native navigation");
+                page.evaluate("() => scrollTo({top:0,behavior:'instant'})");
+                page.click("#jump");
+                page.waitForTimeout(100);
+                page.mouse().move(600, 400);
+                page.mouse().wheel(0, 40);
+                page.waitForTimeout(700);
+                double stopped = ((Number) page.evaluate("() => scrollY")).doubleValue();
+                require(stopped > 0 && stopped < 1100, "the wheel did not stop the motion");
+                require(page.evaluate("() => location.hash").equals("#b"), "wheel input did not cancel the pending history");
+                page.evaluate("() => paste.ui.smoothscroll.scrollTo('c\u00e9', 0)");
+                awaitActive(page, "() => document.getElementById('c\u00e9').matches(':target') && Math.abs(scrollY - 4500) < 2");
+                // A cross-origin <base> refuses the module's own history write;
+                // the address already names the target, and the settle stays.
+                page.evaluate("() => { window.sameDocument = true; const base = document.createElement('base'); base.href = 'https://cdn.other.test/assets/'; document.head.appendChild(base); paste.ui.smoothscroll.scrollTo('c\u00e9', 0); }");
+                page.waitForTimeout(900);
+                require(Boolean.TRUE.equals(page.evaluate("() => window.sameDocument === true && location.href.startsWith('" + url + "')")),
+                    "a document base carried the settle off the page");
+                evidence.put("wheelStop", stopped);
+            });
+        // A disclosure section nav: while the URL does not target its panel
+        // (the wide list), a section link is the module's motion; its toggles,
+        // and a section chosen from the open panel, stay the browser's, which
+        // closes the panel.
+        scenario(browser, engine, "smoothscroll owns disclosure links while the URL does not target the panel and leaves toggles and the open panel native", null,
+            context -> routeCheckPage(context, "smoothscroll-disclosure.html", checkPage(
+                "main{height:5000px}main section{position:absolute;scroll-margin-top:60px}#first{top:1200px}#second{top:2600px}" +
+                "nav{position:fixed;top:0;left:0;right:0;z-index:1;background:#fff}.paste-ui-section-nav-items{display:flex;gap:1rem}",
+                "<nav class='paste-ui-section-nav paste-ui-section-nav-disclosure' data-paste-smoothscroll aria-label='Sections'>" +
+                "<div id='site-sections' class='paste-ui-section-nav-panel' tabindex='-1'><ul class='paste-ui-section-nav-items'>" +
+                "<li class='paste-ui-section-nav-item'><a id='to-first' class='paste-ui-section-nav-link' href='#first'>First</a></li>" +
+                "<li class='paste-ui-section-nav-item'><a id='to-second' class='paste-ui-section-nav-link' href='#second'>Second</a></li></ul></div>" +
+                "<a id='site-sections-toggle' class='paste-ui-section-nav-toggle paste-ui-section-nav-open' href='#site-sections'>Menu</a>" +
+                "<a id='close' class='paste-ui-section-nav-toggle paste-ui-section-nav-close' href='#site-sections-toggle'>Close</a></nav>" +
+                "<main><section id='first'>First</section><section id='second'>Second</section></main>",
+                SMOOTHSCROLL_SCRIPTS, "window.hashEvents=0;addEventListener('hashchange',()=>window.hashEvents++);"), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-disclosure.html");
+                page.click("#to-first");
+                require(((Number) page.evaluate("() => scrollY")).doubleValue() < 1100, "the section link jumped natively");
+                awaitActive(page, "() => Math.abs(scrollY-1140)<2 && document.getElementById('first').matches(':target')");
+                require(((Number) page.evaluate("() => window.hashEvents")).intValue() == 0, "a section link was native while the URL did not target the panel");
+                // hashchange is queued after the navigation, so each native step
+                // waits for its own event.
+                page.click("#site-sections-toggle");
+                page.waitForFunction("() => document.getElementById('site-sections').matches(':target') && window.hashEvents === 1");
+                page.click("#to-second");
+                page.waitForFunction("() => location.hash === '#second' && !document.getElementById('site-sections').matches(':target') && window.hashEvents === 2");
+                awaitActive(page, "() => Math.abs(scrollY-2540)<2");
+                page.click("#close");
+                page.waitForFunction("() => location.hash === '#site-sections-toggle' && window.hashEvents === 3");
+                evidence.put("hashEvents", page.evaluate("() => window.hashEvents"));
+            });
+        // A scroll-margin-top that applies only under :target, here the
+        // section-nav mixin's rule with the page's own clearance property, lands
+        // where native does with no correction at the end: a declared link aims
+        // at the resolved property, whether its container is a section nav or
+        // any other declared element.
+        scenario(browser, engine, "smoothscroll lands a :target-only clearance where native does, without a correction", null,
+            context -> routeCheckPage(context, "smoothscroll-target-margin.html", checkPage(
+                ":root{--paste-ui-section-nav-clearance:calc(1rem + 51px)}:where(:target){scroll-margin-top:var(--paste-ui-section-nav-clearance, 51px)}" +
+                "main{height:5000px}main section{position:absolute}#a{top:1200px}#b{top:2600px}" +
+                ".paste-ui-section-nav{position:fixed;top:0;left:0;right:0;height:44px;z-index:1;background:#fff}#container{position:fixed;top:60px;z-index:1}",
+                "<nav class='paste-ui-section-nav' data-paste-smoothscroll><a id='section-link' href='#b'>B</a></nav><span data-paste-smoothscroll><a id='container' href='#a'>A</a></span>" +
+                "<main><section id='a'>A</section><section id='b'>B</section></main>",
+                SMOOTHSCROLL_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "smoothscroll-target-margin.html");
+                String trail = "() => { window.trail = []; (function f() { const y = Math.round(scrollY); if (trail[trail.length - 1] !== y) trail.push(y); requestAnimationFrame(f); })(); }";
+                String lastStep = "() => Math.max(...trail.slice(-4).map((y, i, a) => i ? Math.abs(y - a[i - 1]) : 0))";
+                page.evaluate(trail);
+                page.click("#container");
+                awaitActive(page, "() => document.getElementById('a').matches(':target') && Math.abs(document.getElementById('a').getBoundingClientRect().top - 67) < 2");
+                page.waitForTimeout(400);
+                require(((Number) page.evaluate(lastStep)).intValue() < 20, "the container link's landing ended with a correction");
+                page.evaluate(trail);
+                page.click("#section-link");
+                awaitActive(page, "() => document.getElementById('b').matches(':target') && Math.abs(document.getElementById('b').getBoundingClientRect().top - 67) < 2");
+                page.waitForTimeout(400);
+                require(((Number) page.evaluate(lastStep)).intValue() < 20, "the section-nav link's landing ended with a correction");
+                require(Math.abs(((Number) page.evaluate("() => document.getElementById('b').getBoundingClientRect().top")).doubleValue() - 67) < 2,
+                    "the section-nav link's landing did not hold at the platform's clearance");
+                evidence.put("declaredTop", page.evaluate("() => document.getElementById('b').getBoundingClientRect().top"));
             });
         // Native motion: the page's CSS owns movement and clearance, so a click
         // is the browser's own fragment navigation (with its hashchange) and
