@@ -257,6 +257,32 @@ function envelope(markup, code=200, title) {
                     await page.waitForFunction(()=>!document.querySelector('[aria-busy]'));
                     assert.equal(await page.locator('section').textContent(),'Old story');assert.equal(page.url(),'http://paste.test/#local-section');assert.deepEqual(errors,[]);await page.close();
                 });
+                await check('a same-address replace leaves a pending article request standing',async()=>{
+                    let release;const gate=new Promise(resolve=>release=resolve);
+                    const {page,errors}=await fixture(browser,optimized,'<a id="article" href="/article" data-paste-io-reply-fragment="story">Article</a><a id="local" href="#local-section">Local</a><p id="local-section">Local section</p>'+targets,
+                        ['fragment_navigation'],async r=>{await gate;await r.fulfill({contentType:'text/html',body:'<p>Article</p>'}).catch(()=>{});});
+                    await page.click('#local');await page.waitForURL('**/#local-section');
+                    await page.click('#article');await page.waitForSelector('[aria-busy]');
+                    await page.evaluate(()=>location.replace(location.hash));release();
+                    await page.waitForFunction(()=>!document.querySelector('[aria-busy]'));
+                    assert.equal(await page.locator('section').textContent(),'Article');assert.equal(page.url(),'http://paste.test/article');assert.deepEqual(errors,[]);await page.close();
+                });
+                // Smoothscroll's section-nav motion lands after an article click: its
+                // settle neither cancels the pending request nor takes the placed
+                // target's focus.
+                const scroller='<style>#second{margin-top:3000px}main{min-height:6000px}</style><nav class="paste-ui-section-nav" data-paste-smoothscroll><a id="to-second" href="#second">Second</a></nav><a id="article" href="/article" data-paste-io-reply-fragment="story">Read</a>'+targets+'<p id="second">Second</p>';
+                for(const [name,held] of [['a section-nav motion that lands during an article request leaves it standing',1000],['a section-nav motion that lands after an article is placed leaves its focus',120]]){
+                    await check(name,async()=>{
+                        const {page,errors}=await fixture(browser,optimized,scroller,['utilities/animation-frame','smoothscroll','fragment_navigation'],
+                            async r=>{await new Promise(resolve=>setTimeout(resolve,held));await r.fulfill({contentType:'text/html',body:'<p>Article</p>'}).catch(()=>{});});
+                        // Programmatic clicks: Playwright would wait for the moving page to settle.
+                        await page.evaluate(()=>{document.getElementById('to-second').click();setTimeout(()=>document.getElementById('article').click(),80);});await page.waitForSelector('[aria-busy]');
+                        await page.waitForFunction(()=>!document.querySelector('[aria-busy]'));await page.waitForTimeout(900);
+                        assert.equal(await page.locator('section').textContent(),'Article');assert.equal(page.url(),'http://paste.test/article');
+                        assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('section')),true);
+                        assert.ok(Math.abs(await page.evaluate(()=>document.querySelector('section').getBoundingClientRect().top))<2,'the placed article was scrolled away');assert.deepEqual(errors,[]);await page.close();
+                    });
+                }
                 await check('lazy HTTP errors leave fallback content and the retry marker intact',async()=>{
                     const {page,errors,requests}=await fixture(browser,optimized,'<section data-lazy-load="/lazy">Fallback</section>', ['lazy_loader'],async r=>r.fulfill({status:500,contentType:'text/html',body:'Error page'}));
                     await Promise.all([page.waitForResponse('**/lazy'),page.evaluate(()=>paste.ui.lazy_loader.load_all_content(document))]);await page.waitForFunction(()=>!document.querySelector('[aria-busy]'));

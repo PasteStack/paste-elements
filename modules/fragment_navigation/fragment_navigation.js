@@ -82,8 +82,11 @@ paste['define']('paste.ui.fragment_navigation', ['paste.event', 'paste.ui.utilit
         onHistory = function () {
             // The server already supplies the complete page at every href.
             // Hash-only traversal retains the browser's normal fragment behavior.
-            cancel();
+            // A popstate that keeps the document address, such as an
+            // enhancement settling its own fragment, leaves a pending request
+            // standing; a hash-only navigation still cancels it on hashchange.
             if ($location['href'].split('#')[0] !== displayed) {
+                cancel();
                 $location['reload']();
             }
         },

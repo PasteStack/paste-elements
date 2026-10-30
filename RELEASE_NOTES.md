@@ -1,3 +1,56 @@
+# paste-elements v0.8.1
+
+**Date:** 2026-10-29
+
+## Fixed
+
+- Smoothscroll's own motion lands where native fragment navigation lands.
+  Without an explicit offset it aims at the target's `scroll-margin-top`
+  plus the root's `scroll-padding-top` (a percentage is of the viewport),
+  read per movement, or, when it writes the fragment and the page declares
+  neither, at the section nav's clearance: `--paste-ui-section-nav-clearance`
+  resolved as a length when the root sets it, else the measured nav. Where
+  the fragment is written, the platform's own scroll to it is the landing,
+  so a `:target`-only `scroll-margin-top` such as the section-nav mixin's
+  default holds too. `scrollTo(id, offset)` and `verticalOffset` are held;
+  an undefined `verticalOffset` is no offset.
+- The completion push runs from the scroll position the movement started
+  from, a movement it replaced included, so Back returns there, and a
+  fragment the address already names is not pushed again, as after a native
+  fragment navigation.
+- Once smoothscroll writes the fragment at completion, a same-address
+  `location.replace()` runs the platform's own fragment steps: focus leaves
+  the activated link and moves to a focusable target, keyboard navigation
+  continues from the target and `:target` follows, as with native fragment
+  navigation. It adds no history entry and fires no `hashchange`; Chromium
+  and WebKit fire `popstate` for it, and Firefox then reports the entry's
+  `history.state` as `null`. Ids the address percent-encodes settle too,
+  and focus the visitor moved during the motion stays where they put it.
+- A native navigation (`popstate`) during smoothscroll's motion supersedes
+  it instead of being scrolled away from, and a navigation that moves the
+  document, such as placed fragment markup, stops it where it is: it
+  neither writes a stale fragment nor takes that navigation's focus or
+  scroll.
+- `paste.ui.fragment_navigation` leaves a pending request standing through a
+  `popstate` that keeps the document address, such as smoothscroll settling
+  its fragment. A hash-only navigation, or a traversal to another fragment
+  or document, still cancels it; Back or Forward between entries with the
+  same address does not.
+
+## Changed
+
+- Smoothscroll takes over only declared links again, as the original
+  Jawbone module did: links inside a `data-paste-smoothscroll` container,
+  which a section nav declares on its own `<nav>`. Every other same-document
+  link, an undeclared section nav's included, is native fragment navigation,
+  and every declared link pushes its history at completion.
+- A declared disclosure section nav's links are smoothscroll's while the URL
+  does not target the panel (the wide list); the toggles, and a section
+  chosen from the open panel, stay native, so the browser still closes the
+  panel and releases its scroll lock.
+
+---
+
 # paste-elements v0.8.0
 
 **Date:** 2026-10-29
