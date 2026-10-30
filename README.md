@@ -400,7 +400,13 @@ the hash; narrowing again reopens the panel while the URL still targets it,
 which is intentional rather than a state reset. The optional scroll lock is
 the mixin's `html:has(.paste-ui-section-nav-panel:target) { overflow: hidden }`
 rule — the only `:has()` use — and degrades to an unlocked menu where `:has()`
-is unsupported. The browser owns disclosure navigation. Use ordinary anchors and author
+is unsupported. The browser owns disclosure navigation: the toggles, and a
+section chosen from the open panel. A nav that declares
+`data-paste-smoothscroll`, where smoothscroll's own motion is in use, makes
+a section link chosen while the URL does not target the panel — the wide
+list — its motion, with a history entry unless the address already names
+the section, and the same `:target` and focus outcome unless the visitor
+moves focus during the motion. Use ordinary anchors and author
 `tabindex="-1"` on a destination that needs to take focus.
 
 Fragment targets clear the nav. The mixin emits a zero-specificity
@@ -437,8 +443,9 @@ alike, and zeroes the custom property as above.
 
 Pass `$target-clearance: null` to leave targets to the page, or a length to
 replace `auto`. The stylesheet does not enable smooth movement. Load the optional
-smoothscroll module for its movement/history contract, or declare CSS
-`scroll-behavior` when native anchor navigation is sufficient.
+smoothscroll module and declare `data-paste-smoothscroll` on the nav for its
+movement/history contract, or declare CSS `scroll-behavior` when native anchor
+navigation is sufficient.
 
 Build and serve the runnable example:
 
@@ -690,8 +697,10 @@ within the original enhanced document. There is no client page cache or router.
 Redirected replies fall back to native navigation, preserving redirect-supplied
 hashes and other browser redirect semantics that XHR does not expose. A
 transmitted failure falls back to normal navigation to the authored href;
-a later native navigation, including a hash-only change, cancels the pending enhancement. Busy target refusals
-are ignored until their owner settles. Stale/superseded responses never navigate.
+a later native navigation, including a hash-only change, cancels the pending
+enhancement; a popstate that keeps the document address, such as an
+enhancement settling its own fragment, does not. Busy target refusals are
+ignored until their owner settles. Stale/superseded responses never navigate.
 
 The utility leaves inserted markup's initialization to its caller. Form HTML
 submission reinitializes its own replacement forms and validity. Lazy loading
@@ -1120,23 +1129,59 @@ missing API or a reduced preference lands immediately. Native smooth scrolling,
 native mode included, follows the page's CSS motion policy.
 
 - **smoothscroll**
-  - Optional same-document anchor motion: 500 ms cubic easing, with a history
-    update independent of native fragment navigation and no synthetic hashchange.
-    Plain anchor clicks push immediately; legacy marked containers and section
-    navs delegate clicks, including newly inserted links, and push at completion.
-  - Links are discovered when the module is defined, or at `DOMContentLoaded`
-    while the document is loading; `init()` repeats discovery without
-    duplicate bindings. `scrollTo(element, duration)` moves only;
-    `scrollTo(id, verticalOffset)` retains the older offset/completion-history
-    contract. Omitted duration is 500 ms; zero is instant.
+  - Optional same-document anchor motion for declared links, as the original
+    Jawbone module had it: a `data-paste-smoothscroll` container — a section
+    nav declares it on its own `<nav>` — delegates its links' clicks,
+    including newly inserted links, and moves with 500 ms cubic easing
+    instead of the native fragment scroll, pushing history at completion
+    with no synthetic `hashchange`. The push runs from the scroll position the
+    movement started from — a movement it replaced included — so Back
+    returns there, and a fragment the address already names is not pushed
+    again. Any other link, an undeclared section nav's included, stays
+    native.
+  - Containers are discovered when the module is defined, or at
+    `DOMContentLoaded` while the document is loading; `init()` repeats
+    discovery without duplicate bindings. `scrollTo(element, duration)` moves
+    only; `scrollTo(id, verticalOffset)` retains the older
+    offset/completion-history contract. Omitted duration is 500 ms; zero is
+    instant.
   - The Paste `smoothscroll` event accepts `newURL`, `verticalOffset`, and
     `updateHash`. The id has no leading `#`; omitted updateHash is true, false
     suppresses history. Legacy boolean strings are case-insensitive. An event
-    without a payload uses the current URL fragment.
-  - Wheel input cancels motion and pending completion history. New movement
-    replaces unfinished movement. Reduced motion lands immediately. No focus
-    reassignment. Modified clicks, foreign destinations, downloads, other
-    browsing contexts and missing targets retain native navigation.
+    without a payload uses the current URL fragment. An undefined
+    `verticalOffset` is no offset.
+  - Movement aims at the clearance native fragment navigation keeps: the
+    target's `scroll-margin-top` plus the root's `scroll-padding-top`, read
+    per movement; a percentage padding is of the viewport, and a `calc()`
+    that mixes one in is not resolved and reads as zero. A
+    `scroll-margin-top` that applies only under `:target`, such as the
+    section-nav mixin's default, is not visible before the navigation, so a
+    movement that writes the fragment aims at the section nav's clearance
+    when the page declares neither: `--paste-ui-section-nav-clearance`
+    resolved as a length when the root sets it, else the first section nav's
+    box, which is the mixin's default. Where that aim differs from the
+    platform's landing, the motion ends with a correction. An explicit offset
+    is held.
+  - Once the fragment is written at completion, a same-address
+    `location.replace()` runs the platform's own fragment steps, and its
+    scroll to the fragment is the landing; an explicit offset is re-asserted
+    over it. As with native fragment navigation, focus leaves the activated
+    link and moves to a focusable target, the sequential focus navigation
+    starting point moves to the target, and `:target` follows. It adds no
+    history entry and fires no `hashchange`; Chromium and WebKit fire
+    `popstate` for it, and Firefox then reports the entry's `history.state`
+    as `null`. Native runs those steps at activation, so focus the visitor
+    moved during the motion stays where they put it, and `:target` then does
+    not follow.
+  - Wheel input stops the motion where it is and cancels pending completion
+    history. A native navigation meanwhile (`popstate`), or one that moves the
+    document, such as placed fragment markup, supersedes it where it is. New
+    movement replaces unfinished movement. Reduced motion lands immediately.
+  - Modified clicks, foreign destinations, downloads, other browsing contexts
+    and missing targets retain native navigation, as do a declared disclosure
+    section nav's toggles and a section chosen from its open panel, so the
+    browser closes the panel and releases its scroll lock. Its section links
+    are the module's while the URL does not target the panel.
   - Native anchors and CSS remain sufficient when these extra contracts are
     not needed. CSS smooth motion alone does not establish history equivalence.
   - Native motion: `:root { --paste-smoothscroll-motion: native; }`, read once
@@ -1331,10 +1376,10 @@ The [`paste-assetgraph`](https://github.com/PasteStack/paste-assetgraph) pipelin
 ## Runtime cost and content lifetime
 
 Smoothscroll discovery uses weak identity membership where `WeakSet` is
-available: repeated `init()` does not rescan previously bound links for each
-candidate or retain removed anchors. Its native-history, easing, cancellation
-and optional API contracts are unchanged. Hosts without `WeakSet` keep the
-legacy membership fallback.
+available: repeated `init()` does not rescan previously bound containers for
+each candidate or retain removed containers. Discovery membership does not
+change its history, easing, cancellation or API contracts. Hosts without
+`WeakSet` keep the legacy membership fallback.
 
 Sticky navigation retains original declaration state weakly where `WeakMap`
 is available. A child-list observer releases detached navs from active tracking
