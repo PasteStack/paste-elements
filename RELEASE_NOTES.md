@@ -1,3 +1,25 @@
+# paste-elements v0.9.0
+
+**Date:** 2026-11-02
+
+## Added
+
+- `data-spy-history` on a scrollspy nav: the current history entry's
+  fragment follows the settled selection — replaced, never pushed —
+  with the active section's after 150 ms without scroll input, and
+  removed above the first section. Only scroll input counts toward the
+  settle; the define-time selection, load, resize and observed geometry
+  passes do not, and one owned timeout decides the moment — re-armed
+  while input continues — so a movement's quiet frames can never
+  trigger an early write and smoothscroll's completion push is never
+  pre-empted. The write touches only a fragment the nav can have
+  written — empty, or one of its links' — preserving `history.state`;
+  a deep link, a disclosure panel's or any other writer's fragment is
+  never replaced. Inert without `history.replaceState`; below
+  `data-spy-min-width` nothing is pending or written.
+
+---
+
 # paste-elements v0.8.1
 
 **Date:** 2026-10-29

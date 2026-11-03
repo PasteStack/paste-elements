@@ -35,6 +35,12 @@
  *   data-spy-touch     — opts the nav in on touch devices; without it a
  *                        touch device keeps the baseline and the module
  *                        binds no scroll or resize listener at all.
+ *   data-spy-history   — opts the address bar into following the settled
+ *                        selection: the current entry's fragment is
+ *                        replaced — never pushed — with the active
+ *                        section's once scrolling stops, and removed
+ *                        above the first section. Inert without
+ *                        history.replaceState.
  *
  * Scheduling: one owned phased frame carries every measurement and
  * every class write. A scroll marks the selection stale; a resize and
@@ -43,6 +49,19 @@
  * viewport width (on geometry passes only — a scroll cannot change
  * it), the geometry and the scroll position; the write phase moves the
  * marker. Only the define-time selection runs outside a frame.
+ *
+ * With data-spy-history the URL follows the visitor's scrolling once it
+ * settles — after 150 ms without scroll input, longer than any gap
+ * between the frames of one movement (smoothscroll's sub-pixel ends,
+ * trackpad momentum tails) and short enough to feel immediate. Only a
+ * pass that consumed scroll input counts as input — the define-time
+ * selection, load, resize and observed geometry passes do not — and
+ * one owned timeout decides the moment, so a completion push such as
+ * smoothscroll's cannot be pre-empted mid-motion. The rewrite touches
+ * only a fragment this nav can have written — empty, or one of its
+ * links' — preserving history.state; a deep link, a disclosure panel's
+ * or any other writer's fragment is never replaced. Below the minimum
+ * width nothing is pending or written.
  *
  * While ineligible below the minimum width no frame is armed for
  * scrolling and no breakpoint is re-measured; a resize still arms one
@@ -79,6 +98,8 @@ paste['define'](
 
         var $w = window,
             $d = document,
+            $history = $w.history,
+            $location = $w.location,
             $round = Math.round,
             root = dom['getDocumentBody'](),
             getScrollTop = dom['getScrollTop'],
@@ -103,6 +124,9 @@ paste['define'](
             breakpoints = [],
             groups = [],
             spyTargets = [],
+            // Each resolved link's fragment, at its target's index —
+            // the only vocabulary the history write may use.
+            hashes = [],
             activeGroup = null,
             lastGroup = 0,
             navOffset = 0,
@@ -113,6 +137,19 @@ paste['define'](
             // write phase: passWrite says whether there is one.
             passWrite = false,
             passGroup = -1,
+            // data-spy-history opts the nav's settled selection into the
+            // address bar; without a writable history it is inert.
+            historyEnabled = !!($parent && $parent.hasAttribute('data-spy-history') &&
+                    $history && typeof $history.replaceState === 'function'),
+            // The settle is a window of quiet, not a quiet frame: a
+            // movement's eased ends can pause a frame mid-motion, so the
+            // URL must wait 150 ms after the last scroll input — longer
+            // than any gap between the frames of one movement, short
+            // enough to feel immediate.
+            SETTLE_MS = 150,
+            settleTimer = null,
+            inputSerial = 0,
+            armedSerial = 0,
 
             // The page-lifetime listeners: kept, never disposed.
             subscriptions = [],
@@ -259,6 +296,79 @@ paste['define'](
                 select();
             },
 
+            // The address follows only a settled scroll, and only ever
+            // inside this nav's own vocabulary: an empty fragment or one
+            // of its links' is replaced — a deep link, a disclosure
+            // panel's or any other writer's stays — and an entry already
+            // naming the section is left alone, smoothscroll's
+            // completion push included. Above the first section the
+            // fragment is removed, back to path and query; history.state
+            // is preserved.
+            writeHistory = function () {
+                var current = $location.hash,
+                    desired,
+                    index;
+                if (activeGroup !== null) {
+                    desired = hashes[activeGroup];
+                    if (desired === current) {
+                        return;
+                    }
+                }
+                if (current) {
+                    index = hashes.length;
+                    while (index--) {
+                        if (hashes[index] === current) {
+                            break;
+                        }
+                    }
+                    if (index < 0) {
+                        return;
+                    }
+                    if (activeGroup === null) {
+                        desired = $location.pathname + $location.search;
+                    }
+                } else if (activeGroup === null) {
+                    return;
+                }
+                // Safari's throttle refuses replaceState with a
+                // SecurityError: the marker keeps its truth and the
+                // address simply lags until a later settle.
+                try {
+                    $history.replaceState($history.state, '', desired);
+                } catch (refused) {
+                    return;
+                }
+            },
+
+            // The window resets while input continues: a timer that
+            // fires behind the serial re-arms once more; only quiet
+            // settles. Below the minimum width the spy owns no active
+            // section, so a late fire must not strip a spy fragment.
+            settle = function () {
+                if (inputSerial !== armedSerial) {
+                    armedSerial = inputSerial;
+                    settleTimer = $w.setTimeout(settle, SETTLE_MS);
+                    return;
+                }
+                settleTimer = null;
+                if (widthEligible()) {
+                    writeHistory();
+                }
+            },
+
+            // Scroll input consumed by a pass counts once toward the
+            // settle; at most one timer is ever outstanding.
+            markHistory = function () {
+                if (!historyEnabled) {
+                    return;
+                }
+                inputSerial += 1;
+                if (settleTimer === null) {
+                    armedSerial = inputSerial;
+                    settleTimer = $w.setTimeout(settle, SETTLE_MS);
+                }
+            },
+
             // Scroll, resize and load share one owned frame, armed as
             // one phased request: a burst of any of them coalesces into
             // one pass on the latest position. The width is read only
@@ -278,12 +388,16 @@ paste['define'](
                 }
                 if (geometryDirty) {
                     geometryDirty = false;
+                    if (selectionDirty) {
+                        markHistory();
+                    }
                     selectionDirty = false;
                     measureGeometry();
                     passWrite = true;
                     passGroup = locate();
                 } else if (selectionDirty) {
                     selectionDirty = false;
+                    markHistory();
                     passWrite = true;
                     passGroup = locate();
                 }
@@ -337,6 +451,7 @@ paste['define'](
                     if (target) {
                         spyTargets.push(target);
                         groups.push(link.parentElement);
+                        hashes.push(link.hash);
                     }
                     index += 1;
                 }

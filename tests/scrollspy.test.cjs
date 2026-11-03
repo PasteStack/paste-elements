@@ -77,7 +77,42 @@ function fixture(options = {}) {
         getAttribute: name => name === 'data-spy-min-width'
             ? (options.minWidth === undefined ? null : String(options.minWidth))
             : null,
-        hasAttribute: name => name === 'data-spy-touch' && !!options.spyTouch
+        hasAttribute: name => (name === 'data-spy-touch' && !!options.spyTouch) ||
+            (name === 'data-spy-history' && !!options.spyHistory)
+    };
+
+    // The address the module may rewrite: a recording history, and a
+    // location the successful replace actually moves.
+    const location = {
+        hash: options.locationHash || '',
+        pathname: '/sections',
+        search: '?view=1'
+    };
+    const replaceCalls = [];
+    const replaceAttempts = {count: 0};
+    const history = options.history !== undefined ? options.history : {
+        state: {kept: true},
+        replaceState: (state, title, url) => {
+            replaceAttempts.count += 1;
+            if (options.replaceThrows) {
+                throw new Error('SecurityError');
+            }
+            replaceCalls.push([state, title, url]);
+            location.hash = url.charAt(0) === '#' ? url : '';
+        }
+    };
+
+    // The module's one owned timeout: a queue the tests fire by hand,
+    // with a high-water mark so "at most one outstanding" is provable.
+    const timers = [];
+    const timerStats = {calls: 0, maxPending: 0};
+    const fakeSetTimeout = (fn, ms) => {
+        timerStats.calls += 1;
+        timers.push({fn, ms});
+        if (timers.length > timerStats.maxPending) {
+            timerStats.maxPending = timers.length;
+        }
+        return timers.length;
     };
 
     const classWrites = [];
@@ -179,7 +214,8 @@ function fixture(options = {}) {
     vm.runInNewContext(
         readModuleSource('paste/ui/scrollspy.js'),
         {
-            window: {decodeURIComponent: decodeURIComponent, ResizeObserver: options.ResizeObserver},
+            window: {decodeURIComponent: decodeURIComponent, ResizeObserver: options.ResizeObserver,
+                history: history, location: location, setTimeout: fakeSetTimeout},
             document: {readyState: options.readyState || 'loading', body: {nodeName: 'BODY'}},
             console,
             paste: {define(name, deps, factory) {
@@ -204,6 +240,13 @@ function fixture(options = {}) {
         layoutReads,
         requested,
         requestedWrites,
+        history,
+        location,
+        replaceCalls,
+        replaceAttempts,
+        timers,
+        timerStats,
+        fireTimers: () => timers.splice(0).forEach(t => t.fn()),
         pendingFrames: () => frames.length,
         fireScroll: () => (listeners.scroll || []).slice().forEach(fn => fn({type: 'scroll'})),
         fireResize: () => (listeners.resize || []).slice().forEach(fn => fn({type: 'resize'})),
@@ -725,4 +768,223 @@ test('absent and touch-ineligible spies read no viewport width and construct no 
         assert.equal(f.layoutReads.width, 0);
         assert.equal(observers, 0);
     }
+});
+
+// data-spy-history: the URL follows the visitor's scrolling once it
+// settles — after SETTLE_MS without scroll input — and only ever inside
+// the nav's own fragment vocabulary. A pass that consumed scroll input
+// counts once toward the settle; one owned timeout decides the moment,
+// re-armed only while input keeps arriving.
+
+test('without data-spy-history the address never follows the marker', () => {
+    const f = fixture({scrollTop: 0});
+    f.state.scrollTop = 600;
+    f.fireScroll();
+    f.pump();
+    assert.ok(f.links[0].parentElement.classes.has('active'), 'precondition: the spy lit section one');
+    f.state.scrollTop = 1600;
+    f.fireScroll();
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 0, 'the URL changed without the opt-in');
+    assert.equal(f.timerStats.calls, 0, 'a spy without the opt-in armed a timer');
+});
+
+test('a settled scroll writes the active section fragment once, preserving history.state', () => {
+    const f = fixture({spyHistory: true, scrollTop: 0});
+    f.state.scrollTop = 600;
+    f.fireScroll();
+    f.pump();
+    assert.ok(f.links[0].parentElement.classes.has('active'), 'the marker did not move');
+    assert.equal(f.replaceCalls.length, 0, 'the fragment was written before the scroll settled');
+    assert.equal(f.timers.length, 1, 'the settle timer was not armed');
+    assert.equal(f.timers[0].ms, 150, 'the settle window is not 150 ms');
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 1, 'the settle did not write exactly once');
+    assert.strictEqual(f.replaceCalls[0][0], f.history.state, 'history.state was not passed through');
+    assert.equal(f.replaceCalls[0][1], '');
+    assert.equal(f.replaceCalls[0][2], '#one');
+    assert.equal(f.location.hash, '#one');
+    assert.equal(f.timers.length, 0, 'a settled timer stayed armed');
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 1, 'a second quiet window wrote again');
+});
+
+test('scrolling without pause holds the write until quiet settles', () => {
+    const f = fixture({spyHistory: true, scrollTop: 0});
+    f.state.scrollTop = 600;
+    f.fireScroll();
+    f.pump();
+    // Input keeps arriving — a quiet (input-free) frame in the middle
+    // is still mid-scroll: the timer's serial has moved, so its fire
+    // re-arms instead of writing.
+    f.state.scrollTop = 1600;
+    f.fireScroll();
+    f.pump();
+    f.pump(); // an input-free frame: no scroll event, not a settle
+    f.state.scrollTop = 2600;
+    f.fireScroll();
+    f.pump();
+    assert.equal(f.replaceCalls.length, 0, 'the write fired mid-scroll');
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 0, 'the first timeout fired early');
+    assert.equal(f.timers.length, 1, 'a stale fire did not re-arm once more');
+    assert.equal(f.timerStats.maxPending, 1, 'more than one timer was outstanding');
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 1, 'the quiet window did not write');
+    assert.equal(f.replaceCalls[0][2], '#three');
+    assert.equal(f.timers.length, 0);
+});
+
+test('a fragment already naming the section is not rewritten', () => {
+    const f = fixture({spyHistory: true, scrollTop: 0, locationHash: '#two'});
+    f.state.scrollTop = 1600;
+    f.fireScroll();
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 0, 'an entry already naming the section was replaced');
+    assert.equal(f.location.hash, '#two');
+});
+
+test('above the first section a spy fragment is removed, an empty one left', () => {
+    const f = fixture({spyHistory: true, scrollTop: 0});
+    // Scroll input above the first breakpoint with an empty fragment:
+    // nothing to write.
+    f.state.scrollTop = 100;
+    f.fireScroll();
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 0, 'an empty fragment above the first section was rewritten');
+    // Into section one, then back above it: the fragment is removed.
+    f.state.scrollTop = 600;
+    f.fireScroll();
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.location.hash, '#one', 'precondition: the fragment was written');
+    f.state.scrollTop = 100;
+    f.fireScroll();
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 2, 'leaving the sections did not remove the fragment');
+    assert.strictEqual(f.replaceCalls[1][0], f.history.state);
+    assert.equal(f.replaceCalls[1][2], '/sections?view=1');
+    assert.equal(f.location.hash, '');
+});
+
+test('a fragment someone else wrote is never overwritten', () => {
+    for (const foreign of ['#panel', '#deep-link']) {
+        const f = fixture({spyHistory: true, scrollTop: 0, locationHash: foreign});
+        f.state.scrollTop = 600;
+        f.fireScroll();
+        f.pump();
+        f.fireTimers();
+        assert.equal(f.replaceCalls.length, 0, foreign + ' was overwritten inside the sections');
+        assert.equal(f.location.hash, foreign);
+        f.state.scrollTop = 100;
+        f.fireScroll();
+        f.pump();
+        f.fireTimers();
+        assert.equal(f.replaceCalls.length, 0, foreign + ' was overwritten above the first section');
+        assert.equal(f.location.hash, foreign);
+    }
+});
+
+test('width-ineligible passes write and pend nothing', () => {
+    const f = fixture({spyHistory: true, scrollTop: 1600, minWidth: 900, viewportWidth: 800});
+    for (let i = 0; i < 5; i += 1) { f.fireScroll(); }
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 0, 'an ineligible spy wrote history');
+    assert.equal(f.timerStats.calls, 0, 'an ineligible spy armed a timer');
+    // Becoming eligible through a geometry pass counts no input.
+    f.state.viewportWidth = 1200;
+    f.fireResize();
+    f.pump();
+    assert.ok(f.links[1].parentElement.classes.has('active'), 'precondition: eligible again');
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 0, 'a geometry-only pass wrote history');
+    // Eligibility lost between the scroll and the settle blocks the
+    // write — and must not strip a spy fragment while activeGroup is
+    // cleared below the minimum.
+    f.location.hash = '#one';
+    f.state.scrollTop = 600;
+    f.fireScroll();
+    f.pump();
+    assert.equal(f.timers.length, 1, 'the settle timer was not armed');
+    f.state.viewportWidth = 800;
+    f.fireResize();
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 0, 'ineligibility wrote history');
+    assert.equal(f.location.hash, '#one', 'ineligibility stripped a spy fragment');
+});
+
+test('a refused replaceState is swallowed and the marker stands', () => {
+    const f = fixture({spyHistory: true, scrollTop: 0, replaceThrows: true});
+    f.state.scrollTop = 600;
+    f.fireScroll();
+    f.pump();
+    f.fireTimers();
+    assert.ok(f.links[0].parentElement.classes.has('active'), 'the marker did not move');
+    assert.equal(f.replaceAttempts.count, 1, 'the write was never attempted');
+    assert.equal(f.location.hash, '', 'a refused write still changed the address');
+    f.state.scrollTop = 1600;
+    f.fireScroll();
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.replaceAttempts.count, 2, 'a later settle did not attempt again');
+});
+
+test('without a writable history the opt-in is inert', () => {
+    for (const history of [{state: {}}, null]) {
+        const f = fixture({spyHistory: true, scrollTop: 0, history: history});
+        f.state.scrollTop = 600;
+        f.fireScroll();
+        f.pump();
+        assert.ok(f.links[0].parentElement.classes.has('active'), 'the spy did not work');
+        assert.equal(f.timerStats.calls, 0, 'the feature armed a timer it could not use');
+        f.fireTimers();
+    }
+});
+
+test('only scroll input arms the history write', () => {
+    const f = fixture({spyHistory: true, scrollTop: 1600});
+    // The define-time selection lit section two without a frame.
+    assert.ok(f.links[1].parentElement.classes.has('active'), 'precondition: lit at define');
+    f.fireTimers();
+    assert.equal(f.timerStats.calls, 0, 'the define-time selection armed a timer');
+    // Load and resize passes are geometry work: they count no input.
+    f.fireLoaded();
+    f.pump();
+    f.fireResize();
+    f.pump();
+    assert.equal(f.timerStats.calls, 0, 'a geometry pass armed a timer');
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 0, 'a geometry pass wrote history');
+});
+
+test('observed geometry passes never arm the history write', () => {
+    let changed;
+    const f = fixture({spyHistory: true, scrollTop: 1600, readyState: 'complete',
+        ResizeObserver: class {
+            constructor(callback) { changed = callback; }
+            observe() {}
+        }});
+    for (let i = 0; i < 5; i += 1) { changed(); }
+    f.pump();
+    f.fireTimers();
+    assert.equal(f.timerStats.calls, 0, 'an observed geometry pass armed a timer');
+    assert.equal(f.replaceCalls.length, 0, 'an observed geometry pass wrote history');
+});
+
+test('a scroll consumed inside a geometry pass still counts as input', () => {
+    const f = fixture({spyHistory: true, scrollTop: 0});
+    f.fireResize();
+    f.state.scrollTop = 600;
+    f.fireScroll();
+    f.pump();
+    assert.equal(f.timers.length, 1, 'scroll input inside a geometry pass armed no timer');
+    f.fireTimers();
+    assert.equal(f.replaceCalls.length, 1, 'scroll input inside a geometry pass did not settle');
+    assert.equal(f.replaceCalls[0][2], '#one');
 });
