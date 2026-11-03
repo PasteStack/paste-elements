@@ -1,4 +1,6 @@
-# Unreleased
+# paste-elements v0.9.0
+
+**Date:** 2026-11-02
 
 ## Added
 
