@@ -755,6 +755,15 @@ public final class ElementsBrowserChecks {
     private static final String[] AUTOGROW_SCRIPTS = {
         "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
         "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/ui/autogrow.js"};
+    private static final String[] SCROLLSPY_SCRIPTS = {
+        "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
+        "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
+        "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/scrollspy.js"};
+    private static final String[] SPY_SMOOTH_SCRIPTS = {
+        "/js/paste/paste.js", "/js/paste/guid.js", "/js/paste/util.js", "/js/paste/oop.js",
+        "/js/paste/dom.js", "/js/paste/event.js", "/js/paste/has.js",
+        "/js/paste/ui/utilities/animation-frame.js", "/js/paste/ui/smoothscroll.js",
+        "/js/paste/ui/scrollspy.js"};
 
     // An authored regression page: its style and markup, the module
     // chain it declares, then any page script that must run after the
@@ -1283,6 +1292,159 @@ public final class ElementsBrowserChecks {
                 awaitActive(page, "() => document.getElementById('second-link').classList.contains('active')");
                 require(page.locator("li.active").count() == 1, "the old active group was not cleared");
                 evidence.put("positiveControl", "both section parents became active in turn");
+            });
+
+        // data-spy-history: the current entry's fragment follows the
+        // settled selection — a replace, never a push — and is removed
+        // above the first section.
+        scenario(browser, engine, "scrollspy history follows the settled scroll without adding entries", null,
+            context -> routeCheckPage(context, "scrollspy-history-follow.html", checkPage(
+                "nav{position:fixed;top:0;height:40px}section{height:1000px}#lead{height:300px}",
+                "<nav data-paste-scrollspy data-spy-touch data-spy-history><ul>" +
+                "<li id=\"spyh-first\"><a href=\"#spyh-one\">One</a></li>" +
+                "<li id=\"spyh-second\"><a href=\"#spyh-two\">Two</a></li></ul></nav>" +
+                "<div id=\"lead\"></div><section id=\"spyh-one\">One</section><section id=\"spyh-two\">Two</section>",
+                SCROLLSPY_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrollspy-history-follow.html");
+                int entries = ((Number) page.evaluate("() => history.length")).intValue();
+                page.evaluate("() => window.scrollTo(0, 400)");
+                awaitActive(page, "() => document.getElementById('spyh-first').classList.contains('active')" +
+                    " && location.hash === '#spyh-one'");
+                page.evaluate("() => window.scrollTo(0, 1350)");
+                awaitActive(page, "() => document.getElementById('spyh-second').classList.contains('active')" +
+                    " && location.hash === '#spyh-two'");
+                frames(page);
+                require(page.evaluate("() => location.hash").equals("#spyh-two"),
+                    "the settled fragment was not the active section's");
+                require(((Number) page.evaluate("() => history.length")).intValue() == entries,
+                    "following the scroll added a history entry");
+                page.evaluate("() => window.scrollTo(0, 0)");
+                awaitActive(page, "() => location.hash === ''");
+                require(((Number) page.evaluate("() => history.length")).intValue() == entries,
+                    "removing the fragment above the first section added an entry");
+                evidence.put("entries", page.evaluate("() => history.length"));
+            });
+
+        // A smoothscroll navigation pushes at completion; the spy's own
+        // write must never land mid-motion, or the push would see the
+        // fragment already named and Back would lose its entry. The
+        // travel is long enough that the eased ends move sub-pixel per
+        // frame — the quiet frames a frame-based settle would mistake.
+        scenario(browser, engine, "scrollspy history lets a smoothscroll click push and reconciles after Back", null,
+            context -> routeCheckPage(context, "scrollspy-smooth-history.html", checkPage(
+                "nav{position:fixed;top:0;height:40px}section{height:3200px}#lead{height:300px}",
+                "<nav data-paste-smoothscroll data-paste-scrollspy data-spy-touch data-spy-history><ul>" +
+                "<li id=\"spys-first\"><a href=\"#spys-one\">One</a></li>" +
+                "<li id=\"spys-second\"><a href=\"#spys-two\">Two</a></li></ul></nav>" +
+                "<div id=\"lead\"></div><section id=\"spys-one\">One</section><section id=\"spys-two\">Two</section>",
+                SPY_SMOOTH_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrollspy-smooth-history.html");
+                page.evaluate("() => window.scrollTo(0, 400)");
+                awaitActive(page, "() => location.hash === '#spys-one'");
+                int entries = ((Number) page.evaluate("() => history.length")).intValue();
+                page.click("#spys-second a");
+                awaitActive(page, "() => location.hash === '#spys-two' && scrollY > 3000",
+                    null, new Page.WaitForFunctionOptions().setTimeout(10000));
+                require(((Number) page.evaluate("() => history.length")).intValue() == entries + 1,
+                    "the click did not push its entry — a mid-motion spy write would have suppressed it");
+                frames(page);
+                require(page.evaluate("() => location.hash").equals("#spys-two"),
+                    "the spy rewrote the entry smoothscroll pushed");
+                page.evaluate("() => history.back()");
+                // The restored entry lands the scroll where its engine
+                // keeps it — the fragment's element in some, the
+                // recorded position in others; either is section one's,
+                // and the settle leaves its fragment standing.
+                awaitActive(page, "() => document.getElementById('spys-first').classList.contains('active')" +
+                    " && location.hash === '#spys-one'");
+                frames(page);
+                require(page.evaluate("() => location.hash").equals("#spys-one"),
+                    "Back did not reconcile the URL to the origin's section");
+                evidence.put("entries", page.evaluate("() => history.length"));
+                evidence.put("originY", page.evaluate("() => scrollY"));
+            });
+
+        // The strongest form of the same guard: sampled every frame, the
+        // address never carries the destination fragment before the
+        // movement completes and pushes it — no mid-motion write.
+        scenario(browser, engine, "scrollspy history never writes the target fragment before a smoothscroll arrival", null,
+            context -> routeCheckPage(context, "scrollspy-early-write.html", checkPage(
+                "nav{position:fixed;top:0;height:40px}section{height:3200px}#lead{height:300px}",
+                "<nav data-paste-smoothscroll data-paste-scrollspy data-spy-touch data-spy-history><ul>" +
+                "<li id=\"spye-first\"><a href=\"#spye-one\">One</a></li>" +
+                "<li id=\"spye-second\"><a href=\"#spye-two\">Two</a></li></ul></nav>" +
+                "<div id=\"lead\"></div><section id=\"spye-one\">One</section><section id=\"spye-two\">Two</section>",
+                SPY_SMOOTH_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrollspy-early-write.html");
+                page.evaluate("() => { window.__samples = [];" +
+                    " (function s(){ __samples.push([location.hash, scrollY]);" +
+                    " if (__samples.length < 900) requestAnimationFrame(s); })(); }");
+                page.click("#spye-second a");
+                awaitActive(page, "() => location.hash === '#spye-two' && scrollY > 3000",
+                    null, new Page.WaitForFunctionOptions().setTimeout(10000));
+                Object samples = page.evaluate("() => __samples");
+                evidence.put("samples", ((List<?>) samples).size());
+                require(((List<?>) samples).size() > 5, "the motion ran too few frames to sample");
+                boolean earlyWrite = ((List<?>) samples).stream().anyMatch(sample ->
+                    "#spye-two".equals(((List<?>) sample).get(0)) &&
+                    ((Number) ((List<?>) sample).get(1)).doubleValue() < 3400);
+                require(!earlyWrite, "the target fragment was written before the movement landed");
+            });
+
+        // The rewrite touches only a fragment this nav can have written:
+        // a disclosure panel's or a deep link's stays under scrolling.
+        scenario(browser, engine, "scrollspy history never rewrites a fragment it does not own", null,
+            context -> routeCheckPage(context, "scrollspy-foreign.html", checkPage(
+                "nav{position:fixed;top:0;height:40px}section{height:1000px}#lead{height:300px}",
+                "<nav class=\"paste-ui-section-nav paste-ui-section-nav-disclosure\"" +
+                " data-paste-scrollspy data-spy-history>" +
+                "<div id=\"spyf-panel\" class=\"paste-ui-section-nav-panel\" tabindex=\"-1\"><ul>" +
+                "<li id=\"spyf-first\"><a href=\"#spyf-one\">One</a></li>" +
+                "<li id=\"spyf-second\"><a href=\"#spyf-two\">Two</a></li></ul></div>" +
+                "<a id=\"spyf-toggle\" class=\"paste-ui-section-nav-toggle\" href=\"#spyf-panel\">Menu</a>" +
+                "<a class=\"paste-ui-section-nav-toggle\" href=\"#spyf-toggle\">Close</a></nav>" +
+                "<div id=\"lead\"></div><section id=\"spyf-one\">One</section><section id=\"spyf-two\">Two</section>",
+                SCROLLSPY_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrollspy-foreign.html");
+                page.evaluate("() => location.hash = 'spyf-panel'");
+                page.evaluate("() => window.scrollTo(0, 1350)");
+                awaitActive(page, "() => document.getElementById('spyf-second').classList.contains('active')");
+                frames(page);
+                require(page.evaluate("() => location.hash").equals("#spyf-panel"),
+                    "the disclosure panel's fragment was overwritten");
+                page.evaluate("() => location.hash = 'deep-link'");
+                page.evaluate("() => window.scrollTo(0, 400)");
+                awaitActive(page, "() => document.getElementById('spyf-first').classList.contains('active')");
+                frames(page);
+                require(page.evaluate("() => location.hash").equals("#deep-link"),
+                    "a deep-link fragment was overwritten");
+                // Positive control: an empty fragment is the nav's to write.
+                page.evaluate("() => history.replaceState(history.state, '', location.pathname + location.search)");
+                page.evaluate("() => window.scrollTo(0, 1350)");
+                awaitActive(page, "() => location.hash === '#spyf-two'");
+                evidence.put("reconciled", page.evaluate("() => location.hash"));
+            });
+
+        // Without the attribute the address never follows the marker.
+        scenario(browser, engine, "scrollspy without data-spy-history leaves the URL alone", null,
+            context -> routeCheckPage(context, "scrollspy-no-history.html", checkPage(
+                "nav{position:fixed;top:0;height:40px}section{height:1000px}#lead{height:300px}",
+                "<nav data-paste-scrollspy data-spy-touch><ul>" +
+                "<li id=\"spyn-first\"><a href=\"#spyn-one\">One</a></li>" +
+                "<li id=\"spyn-second\"><a href=\"#spyn-two\">Two</a></li></ul></nav>" +
+                "<div id=\"lead\"></div><section id=\"spyn-one\">One</section><section id=\"spyn-two\">Two</section>",
+                SCROLLSPY_SCRIPTS, null), null),
+            (page, evidence) -> {
+                openCheckPage(page, "scrollspy-no-history.html");
+                page.evaluate("() => window.scrollTo(0, 1350)");
+                awaitActive(page, "() => document.getElementById('spyn-second').classList.contains('active')");
+                frames(page);
+                require(page.evaluate("() => location.hash").equals(""),
+                    "the URL followed the marker without the opt-in");
             });
 
         // A background-image transition computes a cross-fade between the

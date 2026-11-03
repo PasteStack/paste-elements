@@ -1240,6 +1240,19 @@ native mode included, follows the page's CSS motion policy.
   - `data-spy-min-width` retains decimal parseInt behavior: leading
     whitespace and numeric prefixes are accepted; no numeric prefix means no minimum.
   - Touch devices without `data-spy-touch` bind nothing.
+  - `data-spy-history` opts the address bar into following the settled
+    selection: after 150 ms without scroll input, the current history
+    entry's fragment is replaced — never pushed — with the active
+    section's, and removed above the first section. Only a pass that
+    consumed scroll input counts toward the settle; the define-time
+    selection, load, resize and observed geometry passes do not. The
+    write touches only a fragment the nav itself can have written —
+    empty, or one of its links' — preserving `history.state`; a deep
+    link, a disclosure panel's or any other writer's fragment is never
+    replaced, and a fragment already naming the section is left alone,
+    so smoothscroll's completion push is never pre-empted mid-motion.
+    It is inert without `history.replaceState`, and below the minimum
+    width nothing is pending or written.
   - Links that share a parent element keep it lit across their sections.
   - The last section lights at the bottom of the page only after the page has
     scrolled, measured against the live document height, and only while that
