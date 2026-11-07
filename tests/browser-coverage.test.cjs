@@ -615,6 +615,12 @@ const names = fs.readdirSync(path.join(root, 'modules'), {withFileTypes: true})
     .filter(entry => entry.isDirectory() && entry.name !== 'utilities')
     .map(entry => entry.name)
     .filter(name => fs.readdirSync(path.join(root, 'modules', name)).some(file => file.endsWith('.js')));
+const polyfillNames = fs.readdirSync(path.join(root, 'modules', 'polyfills'), {withFileTypes: true})
+    .filter(entry => entry.isDirectory())
+    .filter(entry => fs.readdirSync(path.join(root, 'modules', 'polyfills', entry.name))
+        .some(file => file.endsWith('.js')))
+    .map(entry => 'polyfills ' + entry.name);
+names.push(...polyfillNames);
 
 test('every element module has an executable browser scenario', () => {
     assert.deepEqual(uncovered(names, elements, marquee), [], 'element modules missing browser scenarios');

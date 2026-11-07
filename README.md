@@ -38,6 +38,8 @@ paste-elements/
 │   ├── scrollscrub/            # Scroll progress custom property
 │   ├── imagesequence/          # Scroll-driven frame catalog host (+ SCSS)
 │   ├── progressiveresolution/  # Resolution upgrades under CSS policy
+│   ├── polyfills/              # paste.ui.polyfills.* (JS only)
+│   │   └── cssmath/            # CSS math function declarations
 │   └── utilities/              # paste.ui.utilities.* (JS only)
 │       ├── animation-frame/    # Owned animation-frame batching
 │       ├── throttle/           # Event throttling
@@ -261,6 +263,7 @@ Processes all JS/SCSS, generates versioned output and manifest.
 | marquee | ✓ | ✓ | One semantic list with optional CSS-driven continuous motion |
 | throttle | ✓ | - | Event throttling utility (`paste.ui.utilities.throttle`) |
 | animation-frame | ✓ | - | Batches DOM writes into the next animation frame (`paste.ui.utilities.animation-frame`) |
+| cssmath | ✓ | - | CSS math function fallbacks on numeric declarations (`paste.ui.polyfills.cssmath`) |
 | form | ✓ | ✓ | Ordinary-form validity reflection and submission blocking |
 | apply | ✓ | ✓ | Class-activated JSON submission and field messages |
 | form_html | ✓ | — | Explicit submission with HTML or named JSON-fragment replies |
@@ -941,6 +944,20 @@ documentation says what then applies. The CSS cap
 `--paste-resolution-max-width` is read from the computed custom property: a
 positive plain decimal there is the cap, and anything else means no cap.
 
+`data-paste-ui-polyfills-cssmath-*` arguments follow CSS instead: each
+comma-separated argument is trimmed and read as a CSS number or dimension,
+with an optional sign and exponent, or as one of the calc keywords `e`, `pi`,
+`infinity`, `-infinity` and `NaN`. Percentages are left to the stylesheet,
+because the basis they resolve against may be negative.
+
+When the engine lacks the function, the result is written to the element's
+inline style, so it outranks every normal stylesheet declaration of that
+property, including one in a matching media query; animations and
+transitions still apply over it. Declare a stylesheet rule that must still
+win `!important`; an engine with the function applies it the same way.
+Custom properties are not supported: `CSS.supports` accepts any value for
+one, so it cannot report the function missing.
+
 ## Development checks
 
 Before completing a change, run `tests/run-all-checks.sh`. It must be green:
@@ -1028,9 +1045,10 @@ separate from these correctness and work-count assertions.
 `serve-examples.cjs` binds 127.0.0.1 only and answers only requests whose Host
 names a loopback address. It serves exactly these: the pages under
 `examples/`; the module sources under `modules/` at their dist URLs
-(`/js/paste/ui/<module>.js` for an element, `/js/paste/ui/utilities/<module>.js`
-for a utility); the core `paste` files under `/js/paste/` from
-`PASTE_CORE_JS`; the generated PNGs the pages reference
+(`/js/paste/ui/<module>.js` for an element,
+`/js/paste/ui/utilities/<module>.js` for a utility,
+`/js/paste/ui/polyfills/<module>.js` for a polyfill); the core `paste` files
+under `/js/paste/` from `PASTE_CORE_JS`; the generated PNGs the pages reference
 (`/generated/img/<name>/r<index>.png` and the sequence frames under
 `/generated/sequence/`); and its own `/fixture-identity` record. A path is
 matched against the request target exactly as the client sent it, before any
@@ -1068,12 +1086,13 @@ behaviour suites that read source text (module headers, the documented
 examples, stylesheets, source-shape checks) always read this checkout's
 `modules/`. The tree must hold plain, unhashed copies of the module sources,
 each either at its asset path (`paste/ui/<module>.js`,
-`paste/ui/utilities/<module>.js`) or nested as in `modules/`
-(`<module>/<module>.js` for an element, `utilities/<module>/<module>.js` for a
-utility). Fingerprinted or renamed build output (for example hashed
-paste-assetgraph file names) is not resolvable; copy or link the files into
-that layout first. A file missing from the selected tree fails its suite — it
-never falls back to this checkout.
+`paste/ui/utilities/<module>.js`, `paste/ui/polyfills/<module>.js`) or nested
+as in `modules/` (`<module>/<module>.js` for an element,
+`utilities/<module>/<module>.js` for a utility,
+`polyfills/<module>/<module>.js` for a polyfill). Fingerprinted or renamed
+build output (for example hashed paste-assetgraph file names) is not resolvable;
+copy or link the files into that layout first. A file missing from the selected
+tree fails its suite — it never falls back to this checkout.
 
 ```sh
 PASTE_CORE_JS=/path/to/paste/src/js PASTE_SOURCE_ROOT=/path/to/flat-copy \

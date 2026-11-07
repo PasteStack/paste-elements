@@ -30,8 +30,8 @@
 // modules are a separate release; PASTE_CORE_JS names that checkout or
 // release's src/js directory — this repository must not encode where a
 // machine keeps it. Every paste.ui element URL resolves through this
-// repository's modules/<name>/<name>.js and every paste.ui.utilities URL
-// through modules/utilities/<name>/<name>.js.
+// repository's modules/<name>/<name>.js and grouped Paste UI URLs through
+// modules/<group>/<name>/<name>.js.
 
 const http = require('http');
 const fs = require('fs');
@@ -206,14 +206,15 @@ function serveFile(response, baseDir, requestPath) {
 }
 
 /* The paste.ui URLs this host answers, each spelled exactly as its
- * module's dist identity: paste.ui.<name> at /js/paste/ui/<name>.js and
- * paste.ui.utilities.<name> at /js/paste/ui/utilities/<name>.js. The
- * source checkout keeps each element under modules/<name>/<name>.js and
- * each utility under modules/utilities/<name>/<name>.js. A utility
- * addressed as an element, an element addressed as a utility, an extra
- * directory or a missing extension is not one of these URLs and answers
- * 404. A new module is added here when it is added to modules/; the
- * suite fails while a module source has no URL in this table. */
+ * module's dist identity: paste.ui.<name> at /js/paste/ui/<name>.js,
+ * paste.ui.utilities.<name> at /js/paste/ui/utilities/<name>.js, and
+ * paste.ui.polyfills.<name> at /js/paste/ui/polyfills/<name>.js. The
+ * source checkout keeps each element under modules/<name>/<name>.js, each
+ * utility under modules/utilities/<name>/<name>.js and each polyfill under
+ * modules/polyfills/<name>/<name>.js. A module addressed under another
+ * tier, an extra directory or a missing extension is not one of these URLs
+ * and answers 404. A new module is added here when it is added to modules/;
+ * the suite fails while a module source has no URL in this table. */
 const uiElements = [
     'select', 'allowed_chars', 'imageupload', 'js_tooltip', 'navigate_on_change', 'prevent_double_submit', 'sortable', 'update_text_on_input_change',
     'fragment_navigation', 'autogrow', 'lazy_loader', 'carousel', 'heroscroll', 'imagesequence',
@@ -221,12 +222,16 @@ const uiElements = [
     'stickynav', 'smoothscroll', 'scrolltop'
 ];
 const uiUtilities = ['io-html-fragment', 'form-dom', 'animation-frame', 'imageresolution', 'mediaquery', 'scrollrange', 'throttle'];
+const uiPolyfills = ['cssmath'];
 const uiModuleUrls = routeTable({});
 uiElements.forEach(function (name) {
     uiModuleUrls['/js/paste/ui/' + name + '.js'] = name + '/' + name + '.js';
 });
 uiUtilities.forEach(function (name) {
     uiModuleUrls['/js/paste/ui/utilities/' + name + '.js'] = 'utilities/' + name + '/' + name + '.js';
+});
+uiPolyfills.forEach(function (name) {
+    uiModuleUrls['/js/paste/ui/polyfills/' + name + '.js'] = 'polyfills/' + name + '/' + name + '.js';
 });
 
 const uiForms = ['form_validity', 'form_apply', 'form_html', 'form_autosave'];
@@ -286,6 +291,7 @@ const identityPaths = [
     '/js/paste/ui/utilities/scrollrange.js',
     '/js/paste/ui/utilities/imageresolution.js',
     '/js/paste/ui/utilities/mediaquery.js',
+    '/js/paste/ui/polyfills/cssmath.js',
     '/js/paste/ui/heroscroll.js',
     '/js/paste/ui/stickynav.js',
     '/js/paste/ui/scrollscrub.js',
