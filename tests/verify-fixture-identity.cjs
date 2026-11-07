@@ -77,6 +77,7 @@ const identityPaths = [
     '/js/paste/ui/imagesequence.js',
     '/js/paste/ui/multistate.js',
     '/js/paste/ui/autogrow.js', '/js/paste/ui/smoothscroll.js', '/js/paste/ui/scrolltop.js',
+    '/js/paste/ui/polyfills/cssmath.js',
     '/js/paste/io.js', '/js/paste/ui/utilities/form-dom.js', '/js/paste/ui/utilities/io-html-fragment.js', '/js/paste/ui/form/form_validity.js', '/js/paste/ui/form/form_apply.js', '/js/paste/ui/form/form_html.js', '/js/paste/ui/scrollspy.js',
     '/js/paste/ui/lazy_loader.js', '/js/paste/ui/carousel.js'
 ];
@@ -92,7 +93,9 @@ function confined(root, resolved) {
 function resolveLocal(requestPath) {
     if (requestPath.indexOf('/js/paste/ui/') === 0) {
         const basename = path.basename(requestPath, '.js');
-        const tier = requestPath.indexOf('/js/paste/ui/utilities/') === 0 ? 'utilities' : requestPath.indexOf('/js/paste/ui/form/') === 0 ? 'form' : '';
+        const tier = requestPath.indexOf('/js/paste/ui/utilities/') === 0 ? 'utilities' :
+            requestPath.indexOf('/js/paste/ui/form/') === 0 ? 'form' :
+            requestPath.indexOf('/js/paste/ui/polyfills/') === 0 ? 'polyfills' : '';
         return confined(elementsJs, path.normalize(path.join(elementsJs, tier, basename, basename + '.js')));
     }
     if (requestPath.indexOf('/js/paste/') === 0) {
