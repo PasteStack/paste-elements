@@ -1,3 +1,31 @@
+# paste-elements v0.10.0
+
+**Date:** 2026-11-07
+
+## Added
+
+- `paste.ui.polyfills.cssmath`: declared
+  `data-paste-ui-polyfills-cssmath-<function>="<property>: <args>"` attributes
+  evaluate CSS Values 4/5 math functions — `min`, `max`, `clamp`, `round`,
+  `mod`, `rem`, the trigonometric and hyperbolic helpers, `pow`, `sqrt`,
+  `hypot`, `log`, `exp`, `abs`, `sign`, `progress` and `random` — where the
+  engine lacks the function. The attribute repeats a declaration the page
+  also writes natively, after its fallback, so an engine with the function
+  keeps its own; `CSS.supports` is asked once per distinct property and
+  declaration text and a natively supported declaration is left to the
+  browser. Arguments share one CSS unit or are unitless, percentages stay
+  with the stylesheet, and the calc keywords `e`, `pi`, `infinity`,
+  `-infinity` and `NaN` are recognized. A finite result is written once to
+  the inline style, outranking normal stylesheet declarations — a rule that
+  must still win is declared `!important`, which an engine with the function
+  applies the same way. NaN writes as 0 with its result unit; infinities and
+  large exponent-form results are left to the stylesheet. Invalid
+  declarations are untouched, `random` draws once per element and attribute,
+  custom properties are unsupported, and the module binds once at define
+  time with no listeners and no control API.
+
+---
+
 # paste-elements v0.9.0
 
 **Date:** 2026-11-02
