@@ -384,7 +384,8 @@ test('every module source is served at exactly its declared dist URL', async () 
         .filter((file) => fs.existsSync(file));
     const sources = tierSources(modulesRoot)
         .concat(tierSources(path.join(modulesRoot, 'utilities')))
-        .concat(tierSources(path.join(modulesRoot, 'form')));
+        .concat(tierSources(path.join(modulesRoot, 'form')))
+        .concat(tierSources(path.join(modulesRoot, 'polyfills')));
     assert.ok(sources.length >= 10, 'the scan found almost no module sources');
     const {port, server} = await startFixture();
     try {
@@ -395,7 +396,9 @@ test('every module source is served at exactly its declared dist URL', async () 
             const served = await fetch(port, url);
             assert.equal(served.status, 200, url + ' does not serve ' + path.basename(file));
             assert.equal(served.body, fs.readFileSync(file, 'utf8'), url + ' serves other bytes');
-            const otherTier = url.indexOf('/js/paste/ui/utilities/') === 0
+            const otherTier = url.indexOf('/js/paste/ui/polyfills/') === 0
+                ? url.replace('/js/paste/ui/polyfills/', '/js/paste/ui/')
+                : url.indexOf('/js/paste/ui/utilities/') === 0
                 ? url.replace('/js/paste/ui/utilities/', '/js/paste/ui/')
                 : url.replace('/js/paste/ui/', '/js/paste/ui/utilities/');
             assert.equal(await status(port, otherTier), 404, otherTier + ' aliases ' + url);

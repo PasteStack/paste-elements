@@ -196,12 +196,14 @@ public final class ElementsBrowserChecks {
         "/js/paste/ui/imagesequence.js",
         "/js/paste/ui/multistate.js",
         "/js/paste/ui/autogrow.js", "/js/paste/ui/smoothscroll.js", "/js/paste/ui/scrolltop.js",
+        "/js/paste/ui/polyfills/cssmath.js",
         "/js/paste/io.js", "/js/paste/ui/utilities/form-dom.js", "/js/paste/ui/utilities/io-html-fragment.js", "/js/paste/ui/form/form_validity.js", "/js/paste/ui/form/form_html.js", "/js/paste/ui/form/form_apply.js", "/js/paste/ui/lazy_loader.js", "/js/paste/ui/carousel.js", "/js/paste/ui/scrollspy.js");
 
     // Where the runner's own checkout says a served URL lives — the same
     // mapping serve-examples.cjs applies: enhancement modules come from
     // this repository's modules/<name>/<name>.js, the paste.ui.utilities
-    // modules from modules/utilities/<name>/<name>.js, form modules from
+    // modules from modules/utilities/<name>/<name>.js, polyfills from
+    // modules/polyfills/<name>/<name>.js, form modules from
     // modules/form/<name>/<name>.js; the rest of
     // /js/paste/ resolves inside the supplied paste core tree.
     private static Path servedLocalFile(String urlPath) {
@@ -209,7 +211,8 @@ public final class ElementsBrowserChecks {
             String basename = urlPath.substring(urlPath.lastIndexOf('/') + 1, urlPath.length() - ".js".length());
             Path root = Path.of("modules").toAbsolutePath().normalize();
             Path tier = urlPath.startsWith("/js/paste/ui/utilities/") ? root.resolve("utilities")
-                    : urlPath.startsWith("/js/paste/ui/form/") ? root.resolve("form") : root;
+                    : urlPath.startsWith("/js/paste/ui/form/") ? root.resolve("form")
+                    : urlPath.startsWith("/js/paste/ui/polyfills/") ? root.resolve("polyfills") : root;
             Path resolved = tier.resolve(basename).resolve(basename + ".js").normalize();
             require(resolved.startsWith(root), "module path escapes the modules tree: " + urlPath);
             return resolved;
@@ -873,6 +876,85 @@ public final class ElementsBrowserChecks {
     // touch viewports, base-URL resolution, native lazy loading, nested
     // scrollers, native history and smooth scroll behaviour.
     private static void behaviourRegressions(Browser browser, String engine) {
+        // Simulates missing max() and random() with a CSS.supports stub.
+        scenario(browser, engine, "polyfills cssmath leaves native min untouched and writes unsupported math once", null,
+            context -> {
+                context.addInitScript(
+                    "window.cssmathNativeSupports = CSS.supports.bind(CSS);" +
+                    "window.cssmathRandomCalls = 0;" +
+                    "window.cssmathSupportsReceiver = true;" +
+                    "Math.random = function () { window.cssmathRandomCalls += 1; return 0.25; };" +
+                    "CSS.supports = function (property, value) {" +
+                    " window.cssmathSupportsReceiver = window.cssmathSupportsReceiver && this === CSS;" +
+                    " if (value.indexOf('max(') === 0 || value.indexOf('random(') === 0) return false;" +
+                    " return window.cssmathNativeSupports.call(CSS, property, value);" +
+                    "};");
+                routeCheckPage(context, "polyfills-cssmath.html", checkPage("",
+                    "<div id=\"native\" data-paste-ui-polyfills-cssmath-min=\"width: 1px, 2px\"></div>" +
+                    "<div id=\"fallback\" data-paste-ui-polyfills-cssmath-max=\"width: 1px, 2px\"></div>" +
+                    "<div id=\"random\" data-paste-ui-polyfills-cssmath-random=\"width: 0px, 10px\"></div>",
+                    new String[]{"/js/paste/paste.js", "/js/paste/ui/polyfills/cssmath.js"}, null), null);
+            }, (page, evidence) -> {
+                openCheckPage(page, "polyfills-cssmath.html");
+                Map<?, ?> state = (Map<?, ?>) page.evaluate(
+                    "() => ({nativeSupport: CSS.supports('width', 'min(1px, 2px)')," +
+                    " supportsReceiver: window.cssmathSupportsReceiver," +
+                    " nativeWidth: document.getElementById('native').style.width," +
+                    " fallbackWidth: document.getElementById('fallback').style.width," +
+                    " randomWidth: document.getElementById('random').style.width," +
+                    " randomCalls: window.cssmathRandomCalls})");
+                evidence.put("state", state);
+                require(Boolean.TRUE.equals(state.get("nativeSupport")), "the browser does not support min()");
+                require(Boolean.TRUE.equals(state.get("supportsReceiver")),
+                    "CSS.supports was called without CSS as its receiver");
+                require("".equals(state.get("nativeWidth")), "native min() received a fallback write");
+                active("2px".equals(state.get("fallbackWidth")), "unsupported max() did not write its result");
+                active("2.5px".equals(state.get("randomWidth")),
+                    "unsupported random() did not write the deterministic result");
+                require(((Number) state.get("randomCalls")).intValue() == 1,
+                    "random() did not draw Math.random exactly once");
+            });
+
+        // Simulates an engine without window.CSS.
+        scenario(browser, engine, "polyfills cssmath writes fallbacks without window CSS", null,
+            context -> {
+                context.addInitScript(
+                    "delete window.CSS;" +
+                    "window.cssmathRandomCalls = 0;" +
+                    "Math.random = function () { window.cssmathRandomCalls += 1; return 0.25; };");
+                routeCheckPage(context, "polyfills-cssmath-no-css.html", checkPage(
+                    "#stylesheet-only{width:37px}",
+                    "<div id=\"min\" data-paste-ui-polyfills-cssmath-min=\"width: 1px, 2px\"></div>" +
+                    "<div id=\"clamp\" data-paste-ui-polyfills-cssmath-clamp=\"width: 1px, 2px, 3px\"></div>" +
+                    "<div id=\"round\" data-paste-ui-polyfills-cssmath-round=\"width: up, 1px, 2px\"></div>" +
+                    "<div id=\"random\" data-paste-ui-polyfills-cssmath-random=\"width: 0px, 10px\"></div>" +
+                    "<div id=\"stylesheet-only\" data-paste-ui-polyfills-cssmath-min=\"width: 1px, 2em\"></div>",
+                    new String[]{"/js/paste/paste.js", "/js/paste/ui/polyfills/cssmath.js"}, null), null);
+            }, (page, evidence) -> {
+                openCheckPage(page, "polyfills-cssmath-no-css.html");
+                Map<?, ?> state = (Map<?, ?>) page.evaluate(
+                    "() => ({cssMissing: typeof window.CSS === 'undefined'," +
+                    " minWidth: document.getElementById('min').style.width," +
+                    " clampWidth: document.getElementById('clamp').style.width," +
+                    " roundWidth: document.getElementById('round').style.width," +
+                    " randomWidth: document.getElementById('random').style.width," +
+                    " stylesheetInlineWidth: document.getElementById('stylesheet-only').style.width," +
+                    " stylesheetWidth: getComputedStyle(document.getElementById('stylesheet-only')).width," +
+                    " randomCalls: window.cssmathRandomCalls})");
+                evidence.put("state", state);
+                require(Boolean.TRUE.equals(state.get("cssMissing")), "window.CSS was not removed before module load");
+                active("1px".equals(state.get("minWidth")), "min() did not write a fallback");
+                active("2px".equals(state.get("clampWidth")), "clamp() did not write a fallback");
+                active("2px".equals(state.get("roundWidth")), "round() did not write a fallback");
+                active("2.5px".equals(state.get("randomWidth")), "random() did not write a fallback");
+                require("".equals(state.get("stylesheetInlineWidth")),
+                    "mixed-unit stylesheet declaration received an inline write");
+                require("37px".equals(state.get("stylesheetWidth")),
+                    "a stylesheet-only declaration was changed by the module");
+                require(((Number) state.get("randomCalls")).intValue() == 1,
+                    "random() did not draw Math.random exactly once");
+            });
+
         scenario(browser, engine, "scrollspy corrects late content growth without window resize", null,
             context -> routeCheckPage(context, "spy-late-growth.html", checkPage(
                 "html{scroll-behavior:auto;overflow-anchor:none}nav{position:fixed;top:0;height:40px}" +

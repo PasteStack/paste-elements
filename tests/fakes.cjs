@@ -803,14 +803,15 @@ function frameDriver() {
 
 
 // A spec's `file` is the module's asset key ('paste/ui/x.js',
-// 'paste/ui/utilities/x.js'). A flat distribution keeps every file at its
-// asset key; a checkout keeps elements under modules/<name>/<name>.js and
-// the paste.ui.utilities modules under modules/utilities/<name>/<name>.js.
+// 'paste/ui/utilities/x.js', or 'paste/ui/polyfills/x.js'). A flat
+// distribution keeps every file at its asset key; a checkout keeps elements
+// under modules/<name>/<name>.js and grouped modules under their own folders.
 // Both layouts resolve through here.
 function nestedSourcePath(file) {
     const base = path.basename(file);
     const name = base.slice(0, -path.extname(base).length);
     if (file.indexOf('/form/') !== -1) return path.join(sourceRoot, 'form', name, base);
+    if (file.indexOf('/polyfills/') !== -1) return path.join(sourceRoot, 'polyfills', name, base);
     return file.indexOf('/utilities/') !== -1 ?
         path.join(sourceRoot, 'utilities', name, base) :
         path.join(sourceRoot, name, base);
